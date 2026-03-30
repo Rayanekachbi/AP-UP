@@ -1,0 +1,29 @@
+# Interface utilisateur
+chainlit
+
+# Base de données
+sqlalchemy
+psycopg2-binary
+pgvector
+
+# Modèles de langage
+openai
+
+# Embedding
+sentence-transformers
+
+# Ingestion documentaire
+pdfplumber
+marker-pdf
+unstructured
+whisper
+
+# Chunking
+tiktoken
+
+# Filtrage
+numpy
+
+# Utilitaires
+pathlib
+python-dotenv
