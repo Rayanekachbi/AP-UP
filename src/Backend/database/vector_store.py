@@ -1,0 +1,222 @@
+# ============================================================
+# vector_store.py - Module 3 : Interactions avec la base
+# Contient les fonctions d'insertion et de recherche
+# ============================================================
+
+from sqlalchemy.orm import Session
+from pgvector.sqlalchemy import Vector
+from src.Backend.database.models import Chunk, Module, Historique
+import json
+
+
+# ============================================================
+# FONCTION 1 : inserer_chunk()
+# Insère un chunk (texte + vecteur) dans la table chunks
+# Appelée par le Module 2 après le découpage d'un document
+# ============================================================
+
+def inserer_chunk(
+    db: Session,
+    contenu: str,
+    embedding: list,
+    document_id: int,
+    chunk_index: int,
+    page: int = None,
+    section: str = None
+) -> Chunk:
+    """
+    Insère un fragment de texte et son vecteur dans la base.
+
+    Paramètres :
+    - db          : session SQLAlchemy
+    - contenu     : texte brut du fragment
+    - embedding   : vecteur sémantique (liste de 768 floats)
+    - document_id : ID du document source
+    - chunk_index : numéro d'ordre du chunk dans le document
+    - page        : numéro de page (optionnel)
+    - section     : titre de la section parente (optionnel)
+
+    Retourne l'objet Chunk créé.
+    """
+
+    # Étape 1 : créer l'objet Chunk
+    chunk = Chunk(
+        document_id=document_id,
+        contenu_texte=contenu,
+        embedding=embedding,
+        page_source=page,
+        section=section,
+        chunk_index=chunk_index
+    )
+
+    # Étape 2 : ajouter à la session
+    db.add(chunk)
+
+    # Étape 3 : valider la transaction
+    db.commit()
+
+    # Étape 4 : rafraîchir l'objet pour récupérer l'ID généré
+    db.refresh(chunk)
+
+    return chunk
+
+
+# ============================================================
+# FONCTION 2 : rechercher_chunks()
+# Recherche les top_k chunks les plus proches d'un vecteur
+# Appelée par le Module 4 (RAG) pour récupérer le contexte
+# ============================================================
+
+def rechercher_chunks(
+    db: Session,
+    query_vector: list,
+    module_id: int,
+    top_k: int = 5
+) -> list[dict]:
+    """
+    Recherche les chunks les plus pertinents par similarité cosinus.
+
+    Paramètres :
+    - db           : session SQLAlchemy
+    - query_vector : vecteur de la question de l'étudiant
+    - module_id    : ID du module pédagogique sélectionné
+    - top_k        : nombre de chunks à retourner (défaut : 5)
+
+    Retourne une liste de dictionnaires contenant le texte
+    et les métadonnées de chaque chunk.
+    """
+
+    # Recherche par similarité cosinus via pgvector
+    # On filtre par module_id via la relation chunks → documents → modules
+    resultats = (
+        db.query(Chunk)
+        .join(Chunk.document)           # Joint avec la table documents
+        .filter_by(module_id=module_id) # Filtre par module
+        .order_by(Chunk.embedding.cosine_distance(query_vector))  # Trie par similarité
+        .limit(top_k)
+        .all()
+    )
+
+    # Formater les résultats en liste de dictionnaires
+    chunks_formates = []
+    for chunk in resultats:
+        chunks_formates.append({
+            "id": chunk.id,
+            "text": chunk.contenu_texte,
+            "vector": chunk.embedding,
+            "document_id": chunk.document_id,
+            "page": chunk.page_source,
+            "section": chunk.section,
+            "chunk_index": chunk.chunk_index,
+            "source": chunk.document.titre  # Nom du fichier source
+        })
+
+    return chunks_formates
+
+
+# ============================================================
+# FONCTION 3 : get_system_prompt()
+# Récupère le prompt système défini par l'enseignant
+# Appelée par le Module 4 avant d'assembler le prompt RAG
+# ============================================================
+
+def get_system_prompt(db: Session, module_id: int) -> str:
+    """
+    Récupère le prompt système d'un module pédagogique.
+
+    Paramètres :
+    - db        : session SQLAlchemy
+    - module_id : ID du module pédagogique
+
+    Retourne le prompt système ou un prompt par défaut.
+    """
+
+    # Chercher le module dans la base
+    module = db.query(Module).filter_by(id=module_id).first()
+
+    # Si le module n'existe pas ou n'a pas de prompt défini
+    if not module or not module.system_prompt:
+        return (
+            "Tu es un assistant pédagogique. "
+            "Réponds uniquement en te basant sur le contexte fourni. "
+            "Si la réponse n'est pas dans le contexte, dis-le clairement."
+        )
+
+    return module.system_prompt
+
+
+# ============================================================
+# FONCTION 4 : sauvegarder_historique()
+# Enregistre un échange question/réponse dans l'historique
+# Appelée par le Module 4 après validation de la réponse
+# ============================================================
+
+def sauvegarder_historique(
+    db: Session,
+    utilisateur_id: int,
+    module_id: int,
+    question: str,
+    reponse: str,
+    chunks_ids: list[int]
+) -> Historique:
+    """
+    Sauvegarde un échange question/réponse dans la base.
+
+    Paramètres :
+    - db             : session SQLAlchemy
+    - utilisateur_id : ID de l'étudiant
+    - module_id      : ID du module concerné
+    - question       : question posée par l'étudiant
+    - reponse        : réponse générée par le LLM
+    - chunks_ids     : liste des IDs des chunks utilisés (top_k)
+
+    Retourne l'objet Historique créé.
+    """
+
+    # Étape 1 : créer l'objet Historique
+    historique = Historique(
+        utilisateur_id=utilisateur_id,
+        module_id=module_id,
+        question=question,
+        reponse=reponse,
+        chunks_sources=json.dumps(chunks_ids)  # On stocke la liste en JSON
+    )
+
+    # Étape 2 : ajouter à la session
+    db.add(historique)
+
+    # Étape 3 : valider la transaction
+    db.commit()
+
+    # Étape 4 : rafraîchir l'objet pour récupérer l'ID généré
+    db.refresh(historique)
+
+    return historique
+
+
+# ============================================================
+# FONCTION 5 : get_chunks_par_module()
+# Récupère tous les vecteurs des chunks d'un module
+# Appelée par le Module 5 (Filtrage) pour calculer le centroïde
+# ============================================================
+
+def get_chunks_par_module(db: Session, module_id: int) -> list[list]:
+    """
+    Récupère tous les vecteurs des chunks d'un module.
+    Utilisé par le Module 5 pour calculer le centroïde du corpus.
+
+    Paramètres :
+    - db        : session SQLAlchemy
+    - module_id : ID du module pédagogique
+
+    Retourne une liste de vecteurs (liste de listes de floats).
+    """
+
+    chunks = (
+        db.query(Chunk)
+        .join(Chunk.document)
+        .filter_by(module_id=module_id)
+        .all()
+    )
+
+    return [chunk.embedding for chunk in chunks]
