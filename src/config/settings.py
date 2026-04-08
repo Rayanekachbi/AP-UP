@@ -4,7 +4,7 @@
 # ── Serveur d'inférence ──────────────────────────────────────────────
 #LLM_BASE_URL = "http://172.27.72.55:11434/v1"  # Pléiade (université)
 LLM_BASE_URL = "http://localhost:11434/v1"   # Ollama (développement local)
-LLM_MODEL = "tinyllama:latest"                          # modèle à utiliser
+LLM_MODEL = "phi4-mini:latest"                          # modèle à utiliser
 LLM_TEMPERATURE = 0.1                           # fidélité au cours (0=strict, 1=créatif)
 LLM_API_KEY = "ollama"                          # ignoré par Pléiade/Ollama mais requis
 
@@ -19,7 +19,7 @@ CHUNK_OVERLAP = 50      # chevauchement entre deux chunks en tokens
 TOP_K = 5               # nombre de chunks pertinents à récupérer
 
 # ── Embedding ────────────────────────────────────────────────────────
-EMBEDDING_MODEL = "intfloat/multilingual-e5-large"  # modèle sentence-transformers
+EMBEDDING_MODEL = "intfloat/multilingual-e5-base"  # modèle sentence-transformers
 EMBEDDING_DIMENSION = 768                            # dimension des vecteurs
 
 # ── Filtrage ─────────────────────────────────────────────────────────
@@ -30,3 +30,11 @@ SLM_CONFIDENCE_THRESHOLD = 0.6   # seuil de confiance du SLM évaluateur
 
 # ── Stockage des fichiers ─────────────────────────────────────────────
 DATA_DIR = "data/"  # répertoire des documents uploadés
+
+# se trouve dans les settings de mounir
+SIMILARITY_THRESHOLD_OUT_HIGH = 0.50
+SIMILARITY_THRESHOLD_OUT_LOW = 0.30
+SLM_MODEL = "mistral"
+OLLAMA_BASE_URL = "http://localhost:11434/v1"
+MESSAGE_QUESTION_BLOQUEE = "Votre question ne semble pas liée au contenu du module sélectionné. Veuillez reformuler ou choisir un autre module."
+MESSAGE_REPONSE_BLOQUEE = "La réponse générée ne peut pas être fournie car elle ne semble pas ancrée dans le contenu du cours."
