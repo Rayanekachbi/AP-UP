@@ -12,8 +12,8 @@ from sqlalchemy.orm import sessionmaker, DeclarativeBase
 # Format : postgresql://utilisateur:motdepasse@host:port/base
 # ============================================================
 
-DATABASE_URL = "postgresql://postgres:password@127.0.0.1:5432/ap_up"
-#from src.config.settings import DATABASE_URL
+#DATABASE_URL = "postgresql://postgres:password@127.0.0.1:5432/ap_up"
+from src.config.settings import DATABASE_URL
 
 # ============================================================
 # CLASSE DE BASE POUR LES MODÈLES ORM

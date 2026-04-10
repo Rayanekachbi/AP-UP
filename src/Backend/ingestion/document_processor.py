@@ -4,8 +4,18 @@
 # ============================================================
 
 from pathlib import Path
-from src.config.settings import CHUNK_SIZE, CHUNK_OVERLAP
+from src.config.settings import (
+    CHUNK_SIZE,
+    CHUNK_OVERLAP,
+    COLUMN_TOLERANCE_PX,
+    COLUMN_WINDOW,
+    COLUMN_REPETITIONS
+)
+import re
 
+SYMBOLES_MATHS = re.compile(
+    r'[αβγδεζηθλμνξπρστφψωΩΣΔΓΛΨ∫∂∑∏√∞≤≥≠≈±×÷→←↔∈∉⊂⊃∪∩]'
+)
 
 # ============================================================
 # CLASSE PRINCIPALE : DocumentProcessor
@@ -92,8 +102,21 @@ class DocumentProcessor:
                 # Extraction du texte pour les vérifications
                 texte_page = page.extract_text() or ""
                 texte_total += texte_page
+                
+                # Vérification 2 : formules mathématiques
+                # Méthode 1 : polices mathématiques embarquées (LaTeX, MathJax)
+                polices = {obj.get("fontname", "") for obj in page.chars}
+                if any("CMMI" in p or "CMSY" in p or "Math" in p or "MSAM" in p
+                    for p in polices):
+                    self.pdf_complexity = "complex"
+                    return "complex"
 
-                # Vérification 2 : présence d'images significatives
+                # Méthode 2 : symboles mathématiques dans le texte extrait
+                if SYMBOLES_MATHS.search(texte_page):
+                    self.pdf_complexity = "complex"
+                    return "complex"
+                
+                # Vérification 3 : présence d'images significatives
                 if page.images:
                     images_significatives = [
                         img for img in page.images
@@ -103,18 +126,19 @@ class DocumentProcessor:
                     if len(texte_page.strip()) < 20 and images_significatives:
                         self.pdf_complexity = "scanned"
                         return "scanned"
+                    
                     elif len(images_significatives) > 2:
                         self.pdf_complexity = "complex"
                         return "complex"
 
-                # Vérification 3 : texte en colonnes
+                # Vérification 4 : texte en colonnes
                 words = page.extract_words()
                 if self._est_en_colonnes(words):
                     self.pdf_complexity = "complex"
                     return "complex"
 
-            # Sécurité finale : si après 500 pages (ou moins), 
-            # on a presque aucun texte, c'est forcément un scan.
+            # Sécurité finale : si le PDF entier contient moins de 50 caractères
+            # de texte extractible, c'est un document scanné sans couche texte.
             if len(texte_total.strip()) < 50:
                 self.pdf_complexity = "scanned"
                 return "scanned"
@@ -125,35 +149,43 @@ class DocumentProcessor:
 
     def _est_en_colonnes(self, words: list) -> bool:
         """
-        Détecte si le texte est disposé en colonnes en cherchant
-        un vide significatif au milieu de la page.
+        Détecte les colonnes en vérifiant si une coordonnée X apparaît
+        dans les lignes suivantes de manière répétée (axe vertical persistant).
         """
         if len(words) < 20:
             return False
 
-        positions_x = sorted([w["x0"] for w in words])
-        x_min = min(positions_x)
-        x_max = max(positions_x)
-        largeur = x_max - x_min
+        # Regrouper les mots par ligne avec une tolérance de 3px sur Y
+        # pour absorber les légers décalages de baseline entre mots d'une même ligne
+        lignes = {}
+        for w in words:
+            y = round(w["top"] / 3) * 3
+            lignes.setdefault(y, []).append(w["x0"])
 
-        if largeur < 100:
+        lignes_triees = [xs for _, xs in sorted(lignes.items())]
+
+        if len(lignes_triees) < 4:
             return False
 
-        # Diviser la page en 10 tranches verticales
-        nb_tranches = 10
-        taille_tranche = largeur / nb_tranches
-        tranches = [0] * nb_tranches
+        # Arrondir les X à COLUMN_TOLERANCE_PX près pour absorber
+        # les micro-variations d'alignement dues au kerning et au rendu
+        lignes_arrondies = [
+            [round(x / COLUMN_TOLERANCE_PX) * COLUMN_TOLERANCE_PX for x in xs]
+            for xs in lignes_triees
+        ]
 
-        for x in positions_x:
-            tranche = int((x - x_min) / taille_tranche)
-            tranche = min(tranche, nb_tranches - 1)
-            tranches[tranche] += 1
-
-        # Chercher un vide significatif au milieu (tranches 3 à 6)
-        total_mots = len(positions_x)
-        for i in range(3, 7):
-            if tranches[i] < total_mots * 0.02:  # moins de 2% des mots dans cette tranche
-                return True
+        # Pour chaque X candidat sur une ligne donnée, compter combien de fois
+        # ce même X apparaît dans les COLUMN_WINDOW lignes suivantes.
+        # Si un X se répète COLUMN_REPETITIONS fois ou plus → axe vertical détecté → colonnes
+        nb_lignes = len(lignes_arrondies)
+        for i in range(nb_lignes - COLUMN_WINDOW):
+            for x_candidat in lignes_arrondies[i]:
+                repetitions = sum(
+                    1 for j in range(i + 1, i + 1 + COLUMN_WINDOW)
+                    if x_candidat in lignes_arrondies[j]
+                )
+                if repetitions >= COLUMN_REPETITIONS:
+                    return True
 
         return False
 
@@ -203,17 +235,68 @@ class DocumentProcessor:
 
     def extract_metadata(self) -> dict:
         """
-        Extrait les métadonnées de base du fichier.
-        Les métadonnées spécifiques (pages, sections) sont
-        enrichies lors du chunking.
+        Extrait les métadonnées embarquées dans le document 
+        (auteur, titre, nb pages...).
+        Les métadonnées spécifiques au contenu (pages, sections) sont
+        enrichies plus tard lors du chunking.
         """
         self.metadata = {
             "source": self.file_path.name,
             "format": self.file_type,
-            "chemin": str(self.file_path)
+            "chemin": str(self.file_path),
         }
+
+        # Métadonnées embarquées — selon le format
+        try:
+            if self.file_type == "pdf":
+                self._extract_metadata_pdf()
+            elif self.file_type == "pptx":
+                self._extract_metadata_pptx()
+            elif self.file_type == "docx":
+                self._extract_metadata_docx()
+        except Exception:
+            # Les métadonnées embarquées sont optionnelles
+            # On ne bloque jamais l'ingestion si elles sont absentes ou corrompues
+            pass
+
         return self.metadata
 
+
+    def _extract_metadata_pdf(self) -> None:
+        import pdfplumber
+        with pdfplumber.open(self.file_path) as pdf:
+            meta = pdf.metadata or {}
+            self.metadata.update({
+                "titre":    meta.get("Title", ""),
+                "auteur":   meta.get("Author", ""),
+                "sujet":    meta.get("Subject", ""),
+                "nb_pages": len(pdf.pages),
+            })
+
+
+    def _extract_metadata_pptx(self) -> None:
+        from pptx import Presentation
+        prs = Presentation(self.file_path)
+        props = prs.core_properties
+        self.metadata.update({
+            "titre":     props.title or "",
+            "auteur":    props.author or "",
+            "sujet":     props.subject or "",
+            "nb_slides": len(prs.slides),
+        })
+
+
+    def _extract_metadata_docx(self) -> None:
+        from docx import Document
+        doc = Document(self.file_path)
+        props = doc.core_properties
+        self.metadata.update({
+            "titre":          props.title or "",
+            "auteur":         props.author or "",
+            "sujet":          props.subject or "",
+            "nb_paragraphes": len(doc.paragraphs),
+        })
+        
     # ============================================================
     # MÉTHODE 6 : process()
     # Méthode orchestratrice — appelle tout dans l'ordre
