@@ -1,0 +1,91 @@
+.topbar-right {
+  justify-content: flex-end;
+  gap: 12px;
+  position: relative;
+}
+
+.icon-button {
+  border: none;
+  background: transparent;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.profile-button {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.profile-circle,
+.profile-menu-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #8f123f;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+
+.profile-menu {
+  position: absolute;
+  top: 48px;
+  right: 0;
+  width: 240px;
+  background: white;
+  border: 1px solid #e8e8e8;
+  border-radius: 14px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+  padding: 12px;
+  z-index: 50;
+}
+
+.profile-menu-header {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #efefef;
+  margin-bottom: 10px;
+}
+
+.profile-menu-name {
+  font-weight: 700;
+  margin: 0;
+  color: #111;
+}
+
+.profile-menu-email,
+.profile-menu-role {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: #666;
+}
+
+.profile-menu-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 10px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #111;
+}
+
+.profile-menu-item:hover {
+  background: #f5f5f5;
+}
+
+.profile-menu-item-accent {
+  color: #8f123f;
+  font-weight: 600;
+}
+
+.profile-menu-item-danger {
+  color: #8f123f;
+}

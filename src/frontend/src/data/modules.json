@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1,
+    "name": "Réseaux",
+    "files": [],
+    "suggestions": []
+  },
+  {
+    "id": 2,
+    "name": "Programmation avancée",
+    "files": [],
+    "suggestions": []
+  },
+  {
+    "id": 3,
+    "name": "Algorithmique avancée",
+    "files": [],
+    "suggestions": []
+  },
+  {
+    "id": 4,
+    "name": "Génie logiciel",
+    "files": [],
+    "suggestions": []
+  }
+]
