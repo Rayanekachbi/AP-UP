@@ -1,43 +1,37 @@
-# ============================================================
-# pdf_complex.py - Module 2 : Extraction PDF complexe
-# Utilise marker-pdf pour les PDF avec tableaux/colonnes/formules
-# ============================================================
+# src/Backend/ingestion/pdf_complex.py
 
-from marker.converters.pdf import PdfConverter
-from marker.models import create_model_dict
-from marker.output import text_from_rendered
+from docling.document_converter import DocumentConverter
 from src.Backend.ingestion.document_processor import DocumentProcessor
-
 
 class PDFComplexProcessor(DocumentProcessor):
     """
-    Sous-classe pour les PDF complexes contenant des tableaux,
-    du texte en colonnes ou des formules mathématiques.
-    Utilise marker-pdf qui retourne du Markdown structuré.
+    Traducteur de PDF vers Markdown.
+    Idéal pour les documents avec colonnes, tableaux et formules.
+    Consomme beaucoup moins de RAM que Marker.
     """
 
     def extract_text(self) -> str:
         """
-        Extrait le texte d'un PDF complexe via PdfConverter.
-        Retourne le contenu en Markdown structuré.
+        Convertit le PDF complexe en Markdown vectorisable.
         """
-        # Charger le dictionnaire de modèles
-        model_dict = create_model_dict()
+        print(f"[DOCLING] Début de la conversion : {self.file_path.name}")
+        
+        try:
+            # 1. Initialiser le convertisseur Docling
+            converter = DocumentConverter()
+            
+            # 2. Lancer la conversion (Docling gère les tableaux/colonnes nativement)
+            result = converter.convert(self.file_path)
+            
+            # 3. Exporter le résultat en Markdown
+            # Ce format est parfait pour ton module chunking.py qui cherche les titres '#'
+            texte_markdown = result.document.export_to_markdown()
+            
+            if not texte_markdown:
+                raise ValueError("Le document extrait est vide.")
+                
+            return texte_markdown
 
-        # Initialiser le convertisseur
-        converter = PdfConverter(artifact_dict=model_dict)
-
-        # Convertir le fichier
-        # rendered est un objet contenant le texte et les métadonnées
-        rendered = converter(str(self.file_path))
-
-        # Extraire le texte markdown
-        # text_from_rendered retourne (texte_complet, images, metadonnées)
-        texte_markdown, _, _ = text_from_rendered(rendered)
-
-        if not texte_markdown or len(texte_markdown.strip()) < 10:
-            raise ValueError(
-                f"Extraction échouée pour le fichier : {self.file_path.name}"
-            )
-
-        return texte_markdown
+        except Exception as e:
+            print(f"[ERREUR DOCLING] : {str(e)}")
+            raise e
