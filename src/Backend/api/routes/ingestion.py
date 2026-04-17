@@ -37,8 +37,7 @@ async def upload_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_database_session),
 ):
-    file_path = DATA_DIR / f"{uuid4().hex}_{Path(file.filename or 'document').name}"
-
+    file_path = Path(DATA_DIR) / f"{uuid4().hex}_{Path(file.filename or 'document').name}"
     try:
         from src.Backend.database.models import Document
         from src.Backend.database.vector_store import inserer_chunk
@@ -49,7 +48,7 @@ async def upload_document(
             raise ValueError("Le fichier envoye est vide.")
 
         module, enseignant = _check_owner(db, module_id, enseignant_id)
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
         file_path.write_bytes(content)
 
         chunks, metadata = _process_file(file_path)
