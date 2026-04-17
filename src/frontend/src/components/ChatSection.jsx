@@ -1,7 +1,8 @@
+// src/frontend/src/components/ChatSection.jsx
 import { useMemo, useState } from "react";
 import {
   CHAT_CONNECTION_LABEL,
-  createMockAssistantAnswer,
+  sendMessage, // <-- Nouvel import
 } from "../services/chatService";
 import "../styles/ChatSection.css";
 
@@ -11,8 +12,10 @@ export default function ChatSection({
   setQuestion,
   onSuggestionClick,
   role,
+  user, // <-- Ajout de 'user' dans les props pour avoir son ID
 }) {
   const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(false); // <-- Véritable état de chargement
 
   const moduleMessages = useMemo(() => {
     return messages.filter((message) => {
@@ -20,42 +23,71 @@ export default function ChatSection({
     });
   }, [messages, selectedModule.id]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmedQuestion = question.trim();
-
-    if (!trimmedQuestion) {
+    
+    if (!trimmedQuestion || loading) {
       return;
     }
 
-    const messageTimestamp = Date.now();
     const moduleId = String(selectedModule.id);
+    const timestamp = Date.now();
 
-    setMessages((currentMessages) => [
-      ...currentMessages,
+    // Ajouter le message utilisateur immédiatement
+    setMessages((prev) => [
+      ...prev,
       {
-        id: `${moduleId}-${messageTimestamp}-user-${currentMessages.length}`,
+        id: `${moduleId}-${timestamp}-user`,
         sender: "user",
         text: trimmedQuestion,
         moduleId,
         moduleName: selectedModule.name,
         role,
       },
+    ]);
+    
+    setQuestion("");
+    setLoading(true);
+
+    // Interroger l'API Backend
+    try {
+      const data = await sendMessage({
+        utilisateur_id: user.id, // Nécessite que 'user' soit passé en prop
+        module_id: selectedModule.id,
+        question: trimmedQuestion,
+      });
+
+      // Ajouter la réponse de l'assistant
+      setMessages((prev) => [
+        ...prev,
         {
-          id: `${moduleId}-${messageTimestamp}-assistant-${currentMessages.length}`,
+          id: `${moduleId}-${timestamp}-assistant`,
           sender: "assistant",
-          text: createMockAssistantAnswer(),
+          text: data.reponse,
           moduleId,
           moduleName: selectedModule.name,
         },
-    ]);
-
-    setQuestion("");
+      ]);
+    } catch (err) {
+      // Gérer l'erreur proprement
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `${moduleId}-${timestamp}-error`,
+          sender: "assistant",
+          text: "Une erreur est survenue. Veuillez réessayer.",
+          moduleId,
+          moduleName: selectedModule.name,
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const hasMessages = moduleMessages.length > 0;
-  const hasSuggestions = selectedModule.suggestions.length > 0;
-  const loading = false;
-  const canSend = true;
+  const hasSuggestions = selectedModule.suggestions && selectedModule.suggestions.length > 0;
+  const canSend = !loading; 
 
   return (
     <section className="chat-section">
@@ -73,7 +105,7 @@ export default function ChatSection({
               placeholder="Poser une question"
               className="question-input"
               value={question}
-              aria-busy={loading}
+              disabled={loading}
               onChange={(e) => setQuestion(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleSend();
@@ -89,7 +121,7 @@ export default function ChatSection({
           </div>
 
           <p className={`chat-status ${canSend ? "ready" : "pending"}`}>
-            {CHAT_CONNECTION_LABEL}
+            {loading ? "Connexion au modèle..." : CHAT_CONNECTION_LABEL}
           </p>
 
           {hasSuggestions ? (
@@ -128,6 +160,15 @@ export default function ChatSection({
                   </div>
                 </div>
               ))}
+              {loading && (
+                <div className="message-row assistant">
+                  <div className="message-stack">
+                    <div className="message-bubble assistant typing-indicator">
+                      ...
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -137,7 +178,7 @@ export default function ChatSection({
               placeholder="Poser une question"
               className="question-input"
               value={question}
-              aria-busy={loading}
+              disabled={loading}
               onChange={(e) => setQuestion(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleSend();
@@ -153,7 +194,7 @@ export default function ChatSection({
           </div>
 
           <p className={`chat-status ${canSend ? "ready" : "pending"}`}>
-            {CHAT_CONNECTION_LABEL}
+            {loading ? "Génération en cours..." : CHAT_CONNECTION_LABEL}
           </p>
         </div>
       )}

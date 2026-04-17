@@ -1,85 +1,47 @@
-import allowedUsers from "../data/users.json";
+// src/frontend/src/services/authService.js
+import { buildApiUrl, ApiError } from "./apiClient";
 
 const SESSION_STORAGE_KEY = "ap-up-auth-user";
 
-const storage = {
-  getItem(key) {
-    try {
-      return localStorage.getItem(key);
-    } catch {
-      return null;
-    }
-  },
-  setItem(key, value) {
-    try {
-      localStorage.setItem(key, value);
-    } catch {
-      console.warn(
-        "Impossible d'enregistrer l'état d'authentification dans localStorage."
-      );
-    }
-  },
-  removeItem(key) {
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      console.warn(
-        "Impossible d'effacer l'état d'authentification depuis localStorage."
-      );
-    }
-  },
-};
-
-const wait = (delay) =>
-  new Promise((resolve) => {
-    window.setTimeout(resolve, delay);
+export async function loginUser({ email, password }) {
+  const response = await fetch(buildApiUrl("/auth/login"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
   });
 
-const sanitizeUser = (user) => ({
-  id: user.id,
-  email: user.email,
-  name: user.name,
-  role: user.role,
-});
-
-export async function loginUser({ email, password }) {
-  await wait(350);
-
-  const normalizedEmail = email.trim().toLowerCase();
-  const user = allowedUsers.find(
-    (candidate) =>
-      candidate.email.toLowerCase() === normalizedEmail &&
-      candidate.password === password
-  );
-
-  if (!user) {
-    throw new Error("Email ou mot de passe incorrect.");
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || "Email ou mot de passe incorrect.");
   }
 
-  const sanitizedUser = sanitizeUser(user);
-  storage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sanitizedUser));
-  return sanitizedUser;
+  const user = await response.json();
+
+  // Adapter le format : l'API retourne { id, nom, prenom, email, role }
+  const sanitized = {
+    id: user.id,
+    email: user.email,
+    name: `${user.prenom} ${user.nom}`,
+    role: user.role,
+  };
+
+  localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sanitized));
+  return sanitized;
 }
 
 export function getAuthenticatedUser() {
-  const storedUser = storage.getItem(SESSION_STORAGE_KEY);
-
-  if (!storedUser) {
-    return null;
-  }
-
   try {
-    return JSON.parse(storedUser);
+    const stored = localStorage.getItem(SESSION_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : null;
   } catch {
-    storage.removeItem(SESSION_STORAGE_KEY);
     return null;
   }
 }
 
 export function clearAuthenticatedUser() {
-  storage.removeItem(SESSION_STORAGE_KEY);
+  localStorage.removeItem(SESSION_STORAGE_KEY);
 }
 
 export function canAccessProfessorDashboard(user) {
-  return Boolean(user) && user.role !== "Étudiante";
+  return Boolean(user) && user.role === "enseignant";
 }

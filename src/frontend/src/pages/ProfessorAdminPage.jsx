@@ -1,29 +1,38 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ROUTES } from "../routes/paths";
 import { getModules } from "../services/moduleService";
 import { getProfessorDashboardData } from "../services/professorDashboardService";
+import { buildApiUrl } from "../services/apiClient"; // <-- Nouvel import
 import "../styles/ProfessorAdminPanel.css";
 
-const modulesData = getModules();
+// On garde le mock uniquement pour les documents affichés et le prompt pour le moment
 const professorDashboardData = getProfessorDashboardData();
 
 export default function ProfessorAdminPage({ user, onLogout }) {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("documents");
-  const [selectedCourse, setSelectedCourse] = useState(modulesData[0]?.name || "");
-  const [customCourse, setCustomCourse] = useState("");
+  
+  // Nouveaux états pour gérer les vraies données de l'API
+  const [modulesData, setModulesData] = useState([]);
+  const [selectedModuleId, setSelectedModuleId] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
+  const [uploading, setUploading] = useState(false); // <-- État de chargement
+
   const [systemPrompt, setSystemPrompt] = useState(
     professorDashboardData.systemPromptTemplate
   );
 
-  const courses = useMemo(
-    () => [...new Set(modulesData.map((module) => module.name))],
-    []
-  );
+  // Charger les modules au démarrage
+  useEffect(() => {
+    getModules().then((data) => {
+      setModulesData(data);
+      if (data.length > 0) {
+        setSelectedModuleId(data[0].id); // Sélectionner le premier module par défaut
+      }
+    }).catch(err => console.error("Erreur de chargement des modules:", err));
+  }, []);
 
-  const resolvedCourse = customCourse.trim() || selectedCourse;
   const uploadedDocuments = professorDashboardData.uploadedDocuments;
 
   const handleBackToMainWorkspace = () => {
@@ -33,6 +42,40 @@ export default function ProfessorAdminPage({ user, onLogout }) {
   const handleLogout = () => {
     onLogout();
     navigate(ROUTES.login, { replace: true });
+  };
+
+  const handleUpload = async (e) => {
+    e.preventDefault();
+    if (!selectedFile || !selectedModuleId) return;
+
+    setUploading(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      formData.append("module_id", selectedModuleId);
+      formData.append("enseignant_id", user.id);
+
+      const response = await fetch(buildApiUrl("/ingestion/documents/upload"), {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Erreur lors de l'envoi du document");
+      }
+
+      // Gérer la réponse (succès)
+      alert("Document importé et indexé avec succès !");
+      setSelectedFile(null); // Réinitialiser le fichier
+      
+      // Ici on pourrait plus tard rafraîchir la liste des documents
+    } catch (error) {
+      console.error(error);
+      alert("Une erreur est survenue lors de l'importation.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -49,10 +92,10 @@ export default function ProfessorAdminPage({ user, onLogout }) {
 
         <div className="prof-topbar-actions">
           <div className="prof-user-badge">
-            <div className="prof-user-avatar">{user.name.charAt(0)}</div>
+            <div className="prof-user-avatar">{user?.name?.charAt(0) || "P"}</div>
             <div>
-              <p className="prof-user-name">{user.name}</p>
-              <p className="prof-user-role">{user.role}</p>
+              <p className="prof-user-name">{user?.name}</p>
+              <p className="prof-user-role">{user?.role}</p>
             </div>
           </div>
 
@@ -106,32 +149,21 @@ export default function ProfessorAdminPage({ user, onLogout }) {
                 </div>
               </div>
 
-              <form
-                className="prof-upload-grid"
-                onSubmit={(event) => event.preventDefault()}
-              >
+              {/* Formulaire lié à handleUpload */}
+              <form className="prof-upload-grid" onSubmit={handleUpload}>
                 <label className="prof-field">
-                  <span>Cours</span>
+                  <span>Cours (Module)</span>
                   <select
-                    value={selectedCourse}
-                    onChange={(event) => setSelectedCourse(event.target.value)}
+                    value={selectedModuleId}
+                    onChange={(event) => setSelectedModuleId(event.target.value)}
+                    disabled={uploading}
                   >
-                    {courses.map((course) => (
-                      <option key={course} value={course}>
-                        {course}
+                    {modulesData.map((module) => (
+                      <option key={module.id} value={module.id}>
+                        {module.nom || module.name}
                       </option>
                     ))}
                   </select>
-                </label>
-
-                <label className="prof-field">
-                  <span>Nom personnalisé du cours</span>
-                  <input
-                    type="text"
-                    placeholder="ex. Intelligence artificielle 101"
-                    value={customCourse}
-                    onChange={(event) => setCustomCourse(event.target.value)}
-                  />
                 </label>
 
                 <label className="prof-field">
@@ -139,19 +171,26 @@ export default function ProfessorAdminPage({ user, onLogout }) {
                   <input
                     type="file"
                     accept=".pdf,.doc,.docx,.ppt,.pptx"
-                    onChange={(event) =>
-                      setSelectedFile(event.target.files?.[0] || null)
-                    }
+                    disabled={uploading}
+                    onChange={(event) => {
+                      setSelectedFile(event.target.files?.[0] || null);
+                      // Reset l'input value si on annule
+                      if (!event.target.files?.[0]) event.target.value = "";
+                    }}
                   />
                 </label>
 
                 <div className="prof-upload-actions">
-                  <button type="submit" className="prof-primary-button" disabled>
-                    Importer et indexer le document
+                  <button 
+                    type="submit" 
+                    className="prof-primary-button" 
+                    disabled={!selectedFile || !selectedModuleId || uploading}
+                  >
+                    {uploading ? "Importation en cours..." : "Importer et indexer le document"}
                   </button>
                   <p className="prof-upload-hint">
                     {selectedFile
-                      ? `${selectedFile.name} sélectionné pour ${resolvedCourse}.`
+                      ? `${selectedFile.name} sélectionné.`
                       : "Choisissez un cours et un fichier."}
                   </p>
                 </div>
