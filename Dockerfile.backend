@@ -1,10 +1,38 @@
 FROM python:3.11-slim
 
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Empêche Python de générer des fichiers .pyc et force l'affichage des logs en temps réel
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
+WORKDIR /app
+
+# 1. Installation des dépendances système
+# - tesseract-ocr : pour l'extraction de texte sur images/scans
+# - ffmpeg : indispensable pour openai-whisper (audio)
+# - poppler-utils : pour la manipulation des PDF
+# - libgl1 : requis par certaines bibliothèques de vision (OpenCV/Marker)
+RUN apt-get update && apt-get install -y \
+    tesseract-ocr \
+    tesseract-ocr-fra \
+    tesseract-ocr-eng \
+    ffmpeg \
+    poppler-utils \
+    libgl1 \
+    libglib2.0-0 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Installation des dépendances Python
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# 3. Copie du code source
 COPY . .
 
-# On ajoute --timeout-keep-alive 300 (5 minutes)
-CMD ["uvicorn", "src.Backend.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "600", "--timeout-graceful-shutdown", "600"]
+# 4. Lancement avec timeout étendu pour les modèles lourds (Marker/Whisper)
+CMD ["uvicorn", "src.Backend.api.main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--timeout-keep-alive", "600", \
+     "--timeout-graceful-shutdown", "600"]

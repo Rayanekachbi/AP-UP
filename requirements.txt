@@ -1,29 +1,26 @@
-# Interface utilisateur
-chainlit
+# --- API & Serveur ---
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
 
-# Base de données
-sqlalchemy
-psycopg2-binary
-pgvector
+# --- Base de données ---
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.9
+pgvector>=0.2.5
 
-# Modèles de langage
-openai
+# --- LLM & Embeddings ---
+openai>=1.30.0
+sentence-transformers>=3.0.0
+tiktoken>=0.7.0
 
-# Embedding
-sentence-transformers
+# --- Ingestion & Parsing ---
+pdfplumber>=0.11.0
+#marker-pdf>=0.2.0
+docling>=2.0.0
+unstructured[pdf,pptx,docx]>=0.13.0
+openai-whisper>=20231117
 
-# Ingestion documentaire
-pdfplumber
-marker-pdf
-unstructured
-whisper
-
-# Chunking
-tiktoken
-
-# Filtrage
-numpy
-
-# Utilitaires
-pathlib
-python-dotenv
+# --- Utilitaires ---
+numpy>=1.26.0
+pydantic>=2.7.0
+pypdf>=4.2.0
