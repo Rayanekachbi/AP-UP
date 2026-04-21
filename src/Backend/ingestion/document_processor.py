@@ -84,9 +84,9 @@ class DocumentProcessor:
         de complexité est détecté.
 
         Retourne :
-        - "simple"  → pdfplumber suffit
-        - "complex" → marker-pdf nécessaire (tableaux, colonnes, formules)
-        - "scanned" → unstructured + OCR nécessaire
+        - "simple"  → pdfplumber 
+        - "complex" → docling
+        - "scanned" → unstructured + OCR 
         """
         import pdfplumber
 
@@ -149,45 +149,106 @@ class DocumentProcessor:
 
     def _est_en_colonnes(self, words: list) -> bool:
         """
-        Détecte les colonnes en vérifiant si une coordonnée X apparaît
-        dans les lignes suivantes de manière répétée (axe vertical persistant).
+        Détecte les vraies colonnes en vérifiant que les "colonnes" détectées
+        contiennent réellement une majorité significative des mots.
+        
+        Dans de vraies colonnes :
+        - Chaque colonne contient >20% des mots du document
+        - Les mots sont groupés près des axes verticaux
         """
         if len(words) < 20:
             return False
-
-        # Regrouper les mots par ligne avec une tolérance de 3px sur Y
-        # pour absorber les légers décalages de baseline entre mots d'une même ligne
+    
         lignes = {}
         for w in words:
             y = round(w["top"] / 3) * 3
-            lignes.setdefault(y, []).append(w["x0"])
-
-        lignes_triees = [xs for _, xs in sorted(lignes.items())]
-
+            x = round(w["x0"] / COLUMN_TOLERANCE_PX) * COLUMN_TOLERANCE_PX
+            lignes.setdefault(y, []).append(x)
+    
+        lignes_triees = [(y, xs) for y, xs in sorted(lignes.items())]
+    
         if len(lignes_triees) < 4:
             return False
-
-        # Arrondir les X à COLUMN_TOLERANCE_PX près pour absorber
-        # les micro-variations d'alignement dues au kerning et au rendu
-        lignes_arrondies = [
-            [round(x / COLUMN_TOLERANCE_PX) * COLUMN_TOLERANCE_PX for x in xs]
-            for xs in lignes_triees
-        ]
-
-        # Pour chaque X candidat sur une ligne donnée, compter combien de fois
-        # ce même X apparaît dans les COLUMN_WINDOW lignes suivantes.
-        # Si un X se répète COLUMN_REPETITIONS fois ou plus → axe vertical détecté → colonnes
-        nb_lignes = len(lignes_arrondies)
+    
+        # Étape 1 : Identifier les axes verticaux répétitifs
+        axes_verticaux = set()
+        nb_lignes = len(lignes_triees)
+        
         for i in range(nb_lignes - COLUMN_WINDOW):
-            for x_candidat in lignes_arrondies[i]:
+            _, xs_i = lignes_triees[i]
+            for x_candidat in xs_i:
                 repetitions = sum(
-                    1 for j in range(i + 1, i + 1 + COLUMN_WINDOW)
-                    if x_candidat in lignes_arrondies[j]
+                    1 for j in range(i + 1, min(i + 1 + COLUMN_WINDOW, nb_lignes))
+                    if x_candidat in lignes_triees[j][1]
                 )
                 if repetitions >= COLUMN_REPETITIONS:
-                    return True
-
-        return False
+                    axes_verticaux.add(x_candidat)
+        
+        if len(axes_verticaux) < 2:
+            return False
+        
+        # Étape 2 : Filtrer les axes bien espacés
+        axes_tries = sorted(axes_verticaux)
+        MIN_COLUMN_SPACING = 150
+        
+        colonnes_candidates = [axes_tries[0]]
+        for i in range(1, len(axes_tries)):
+            if axes_tries[i] - colonnes_candidates[-1] >= MIN_COLUMN_SPACING:
+                colonnes_candidates.append(axes_tries[i])
+        
+        if len(colonnes_candidates) < 2:
+            return False
+        
+        # ============================================================
+        # ÉTAPE 3 : VÉRIFICATION PAR DENSITÉ DE CLUSTER
+        # ============================================================
+        # Compter combien de mots appartiennent à chaque colonne
+        # Un mot "appartient" à une colonne s'il est à ±50px de l'axe
+        
+        tous_les_mots_x = [x for _, xs in lignes_triees for x in xs]
+        nb_mots_total = len(tous_les_mots_x)
+        
+        CLUSTER_RADIUS = 50  # Rayon autour de l'axe de colonne
+        
+        mots_par_colonne = []
+        for col_x in colonnes_candidates:
+            # Compter les mots proches de cet axe
+            nb_mots_colonne = sum(
+                1 for x in tous_les_mots_x
+                if abs(x - col_x) <= CLUSTER_RADIUS
+            )
+            pourcentage = (nb_mots_colonne / nb_mots_total) * 100
+            mots_par_colonne.append((col_x, nb_mots_colonne, pourcentage))
+        
+        # Pour avoir de vraies colonnes, chaque colonne doit contenir
+        # au moins 20% des mots du document
+        MIN_POURCENTAGE_PAR_COLONNE = 20
+        
+        colonnes_significatives = [
+            col for col, nb, pct in mots_par_colonne
+            if pct >= MIN_POURCENTAGE_PAR_COLONNE
+        ]
+        
+        # Si moins de 2 colonnes contiennent au moins 20% des mots chacune
+        # → c'est probablement du texte justifié, pas des colonnes
+        if len(colonnes_significatives) < 2:
+            return False
+        
+        # Étape 4 : Vérifier la présence simultanée (au moins 3 lignes)
+        lignes_avec_multi_colonnes = 0
+        
+        for y, xs_ligne in lignes_triees:
+            colonnes_presentes = sum(
+                1 for col_x in colonnes_significatives
+                if col_x in xs_ligne
+            )
+            
+            if colonnes_presentes >= 2:
+                lignes_avec_multi_colonnes += 1
+        
+        MIN_LIGNES_MULTI_COLONNES = 3
+        
+        return lignes_avec_multi_colonnes >= MIN_LIGNES_MULTI_COLONNES
 
     # ============================================================
     # MÉTHODE 3 : extract_text() — abstraite

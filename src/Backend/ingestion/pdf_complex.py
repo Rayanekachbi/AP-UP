@@ -17,14 +17,13 @@ class PDFComplexProcessor(DocumentProcessor):
         print(f"[DOCLING] Début de la conversion : {self.file_path.name}")
         
         try:
-            # 1. Initialiser le convertisseur Docling
+            # Initialiser le convertisseur Docling
             converter = DocumentConverter()
             
-            # 2. Lancer la conversion (Docling gère les tableaux/colonnes nativement)
+            # Lancer la conversion (Docling gère les tableaux/colonnes nativement)
             result = converter.convert(self.file_path)
             
-            # 3. Exporter le résultat en Markdown
-            # Ce format est parfait pour ton module chunking.py qui cherche les titres '#'
+            # Exporter le résultat en Markdown
             texte_markdown = result.document.export_to_markdown()
             
             if not texte_markdown:
