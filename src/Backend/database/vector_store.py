@@ -220,3 +220,37 @@ def get_chunks_par_module(db: Session, module_id: int) -> list[list]:
     )
 
     return [chunk.embedding for chunk in chunks]
+
+
+
+def get_historique_recent(
+    db: Session,
+    utilisateur_id: int,
+    module_id: int,
+    nb_echanges: int,
+) -> list[dict]:
+    """
+    Récupère les derniers échanges de l'utilisateur sur ce module.
+    Utilisé pour donner une mémoire conversationnelle au LLM.
+    """
+    historiques = (
+        db.query(Historique)
+        .filter_by(
+            utilisateur_id=utilisateur_id,
+            module_id=module_id
+        )
+        .order_by(Historique.date_heure.desc())
+        .limit(nb_echanges)
+        .all()
+    )
+
+    # On inverse pour avoir l'ordre chronologique
+    historiques = list(reversed(historiques))
+
+    return [
+        {
+            "question": h.question,
+            "reponse": h.reponse
+        }
+        for h in historiques
+    ]

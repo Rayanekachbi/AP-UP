@@ -92,7 +92,8 @@ class RAGEngine:
         messages = self.prompt_builder.build_prompt(
             question=question,
             chunks=chunks,
-            module_id=module_id
+            module_id=module_id,
+            utilisateur_id=self.utilisateur_id
         )
 
         # Étape 3 : générer en flux continu
@@ -115,7 +116,6 @@ class RAGEngine:
     def sauvegarder(self) -> None:
         """
         Sauvegarde le dernier échange dans l'historique.
-        Appelée par le Module 5 après validation de la réponse.
         """
         sauvegarder_historique(
             db=self.db,

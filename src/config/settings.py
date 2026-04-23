@@ -44,3 +44,5 @@ COLUMN_REPETITIONS = 4     # répétitions min pour valider un axe vertical
 
 # ── Frontend ─────────────────────────────────────────────────────────
 FRONTEND_URL = "http://localhost:5173"  # Port par défaut de Vite (React)
+
+NB_ECHANGES_HISTORIQUE = 1
