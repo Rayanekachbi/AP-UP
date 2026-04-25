@@ -38,10 +38,6 @@ OLLAMA_BASE_URL = "http://host.docker.internal:11434/v1"
 MESSAGE_QUESTION_BLOQUEE = "Votre question ne semble pas liée au contenu du module sélectionné. Veuillez reformuler ou choisir un autre module."
 MESSAGE_REPONSE_BLOQUEE = "La réponse générée ne peut pas être fournie car elle ne semble pas ancrée dans le contenu du cours."
 
-COLUMN_TOLERANCE_PX = 5   # tolérance d'arrondi pour les coordonnées X
-COLUMN_WINDOW = 5          # nombre de lignes suivantes à inspecter
-COLUMN_REPETITIONS = 4     # répétitions min pour valider un axe vertical
-
 # ── Frontend ─────────────────────────────────────────────────────────
 FRONTEND_URL = "http://localhost:5173"  # Port par défaut de Vite (React)
 
