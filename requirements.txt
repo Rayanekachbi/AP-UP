@@ -24,3 +24,9 @@ openai-whisper>=20231117
 numpy>=1.26.0
 pydantic>=2.7.0
 pypdf>=4.2.0
+PyMuPDF>=1.23.0
+
+# --- Dépendances de Tests ---
+pytest>=7.4.0
+pytest-mock>=3.11.1  # Indispensable pour notre mock propre de tiktoken
+pytest-cov>=4.1.0    # Pour générer le rapport de couverture
