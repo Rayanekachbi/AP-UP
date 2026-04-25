@@ -7,11 +7,9 @@ from pathlib import Path
 from src.config.settings import (
     CHUNK_SIZE,
     CHUNK_OVERLAP,
-    COLUMN_TOLERANCE_PX,
-    COLUMN_WINDOW,
-    COLUMN_REPETITIONS
 )
 import re
+import pymupdf
 
 SYMBOLES_MATHS = re.compile(
     r'[αβγδεζηθλμνξπρστφψωΩΣΔΓΛΨ∫∂∑∏√∞≤≥≠≈±×÷→←↔∈∉⊂⊃∪∩]'
@@ -90,6 +88,11 @@ class DocumentProcessor:
         """
         import pdfplumber
 
+        # Vérification rapide de si le texte est en colonnes
+        if self._est_en_colonnes():
+            self.pdf_complexity = "complex"
+            return "complex"
+        
         with pdfplumber.open(self.file_path) as pdf:
             texte_total = "" # Variable pour vérifier le volume de texte global
 
@@ -131,11 +134,6 @@ class DocumentProcessor:
                         self.pdf_complexity = "complex"
                         return "complex"
 
-                # Vérification 4 : texte en colonnes
-                words = page.extract_words()
-                if self._est_en_colonnes(words):
-                    self.pdf_complexity = "complex"
-                    return "complex"
 
             # Sécurité finale : si le PDF entier contient moins de 50 caractères
             # de texte extractible, c'est un document scanné sans couche texte.
@@ -147,108 +145,33 @@ class DocumentProcessor:
         return "simple"
 
 
-    def _est_en_colonnes(self, words: list) -> bool:
+    def _est_en_colonnes(self) -> bool:
         """
-        Détecte les vraies colonnes en vérifiant que les "colonnes" détectées
-        contiennent réellement une majorité significative des mots.
-        
-        Dans de vraies colonnes :
-        - Chaque colonne contient >20% des mots du document
-        - Les mots sont groupés près des axes verticaux
+        Détecte les vraies colonnes en utilisant PyMuPDF.
+        Vérifie le chevauchement vertical et l'espacement horizontal des blocs de texte.
         """
-        if len(words) < 20:
+        import pymupdf
+        
+        try:
+            doc = pymupdf.open(self.file_path)
+            # On vérifie juste les 3 premières pages pour la rapidité
+            for page in doc[:3]:
+                # 0 = block_type texte
+                blocks = [b for b in page.get_text("blocks") if b[6] == 0] 
+                
+                for i, b1 in enumerate(blocks):
+                    for b2 in blocks[i+1:]:
+                        # Chevauchement vertical
+                        chevauchement_y = max(0, min(b1[3], b2[3]) - max(b1[1], b2[1]))
+                        if chevauchement_y > 10: 
+                            # Espacement horizontal (la "gouttière")
+                            distance_x = max(b1[0], b2[0]) - min(b1[2], b2[2])
+                            if distance_x > 20: 
+                                return True
             return False
-    
-        lignes = {}
-        for w in words:
-            y = round(w["top"] / 3) * 3
-            x = round(w["x0"] / COLUMN_TOLERANCE_PX) * COLUMN_TOLERANCE_PX
-            lignes.setdefault(y, []).append(x)
-    
-        lignes_triees = [(y, xs) for y, xs in sorted(lignes.items())]
-    
-        if len(lignes_triees) < 4:
+        except Exception as e:
+            print(f"Avertissement PyMuPDF : Impossible d'analyser les colonnes - {e}")
             return False
-    
-        # Étape 1 : Identifier les axes verticaux répétitifs
-        axes_verticaux = set()
-        nb_lignes = len(lignes_triees)
-        
-        for i in range(nb_lignes - COLUMN_WINDOW):
-            _, xs_i = lignes_triees[i]
-            for x_candidat in xs_i:
-                repetitions = sum(
-                    1 for j in range(i + 1, min(i + 1 + COLUMN_WINDOW, nb_lignes))
-                    if x_candidat in lignes_triees[j][1]
-                )
-                if repetitions >= COLUMN_REPETITIONS:
-                    axes_verticaux.add(x_candidat)
-        
-        if len(axes_verticaux) < 2:
-            return False
-        
-        # Étape 2 : Filtrer les axes bien espacés
-        axes_tries = sorted(axes_verticaux)
-        MIN_COLUMN_SPACING = 150
-        
-        colonnes_candidates = [axes_tries[0]]
-        for i in range(1, len(axes_tries)):
-            if axes_tries[i] - colonnes_candidates[-1] >= MIN_COLUMN_SPACING:
-                colonnes_candidates.append(axes_tries[i])
-        
-        if len(colonnes_candidates) < 2:
-            return False
-        
-        # ============================================================
-        # ÉTAPE 3 : VÉRIFICATION PAR DENSITÉ DE CLUSTER
-        # ============================================================
-        # Compter combien de mots appartiennent à chaque colonne
-        # Un mot "appartient" à une colonne s'il est à ±50px de l'axe
-        
-        tous_les_mots_x = [x for _, xs in lignes_triees for x in xs]
-        nb_mots_total = len(tous_les_mots_x)
-        
-        CLUSTER_RADIUS = 50  # Rayon autour de l'axe de colonne
-        
-        mots_par_colonne = []
-        for col_x in colonnes_candidates:
-            # Compter les mots proches de cet axe
-            nb_mots_colonne = sum(
-                1 for x in tous_les_mots_x
-                if abs(x - col_x) <= CLUSTER_RADIUS
-            )
-            pourcentage = (nb_mots_colonne / nb_mots_total) * 100
-            mots_par_colonne.append((col_x, nb_mots_colonne, pourcentage))
-        
-        # Pour avoir de vraies colonnes, chaque colonne doit contenir
-        # au moins 20% des mots du document
-        MIN_POURCENTAGE_PAR_COLONNE = 20
-        
-        colonnes_significatives = [
-            col for col, nb, pct in mots_par_colonne
-            if pct >= MIN_POURCENTAGE_PAR_COLONNE
-        ]
-        
-        # Si moins de 2 colonnes contiennent au moins 20% des mots chacune
-        # → c'est probablement du texte justifié, pas des colonnes
-        if len(colonnes_significatives) < 2:
-            return False
-        
-        # Étape 4 : Vérifier la présence simultanée (au moins 3 lignes)
-        lignes_avec_multi_colonnes = 0
-        
-        for y, xs_ligne in lignes_triees:
-            colonnes_presentes = sum(
-                1 for col_x in colonnes_significatives
-                if col_x in xs_ligne
-            )
-            
-            if colonnes_presentes >= 2:
-                lignes_avec_multi_colonnes += 1
-        
-        MIN_LIGNES_MULTI_COLONNES = 3
-        
-        return lignes_avec_multi_colonnes >= MIN_LIGNES_MULTI_COLONNES
 
     # ============================================================
     # MÉTHODE 3 : extract_text() — abstraite
