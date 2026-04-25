@@ -1,14 +1,14 @@
-============================================================
-AIDE-MÉMOIRE : COMMANDES PYTEST POUR L'INGESTION
-============================================================
+=================================
+COMMANDES PYTEST POUR L'INGESTION
+=================================
 
 1. Lancer TOUS les tests (Unitaires + Intégration)
 > pytest tests_ingestion/ -v
 
-2. Lancer UNIQUEMENT les tests unitaires ultra-rapides (Dev quotidien)
+2. Lancer UNIQUEMENT les tests unitaires rapides
 > pytest tests_ingestion/ -v -m "not slow"
 
-3. Lancer UNIQUEMENT les tests d'intégration (Avant un commit)
+3. Lancer UNIQUEMENT les tests d'intégration (lents)
 > pytest tests_ingestion/ -v -m "slow"
 
 4. Vérifier la couverture de code (Est-ce que je teste bien tout mon code ?)
