@@ -294,6 +294,29 @@
   gap: 10px;
 }
 
+.prof-delete-document-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #d7dce6;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  padding: 6px;
+}
+
+.prof-delete-document-button:hover {
+  background: #f8e8ef;
+}
+
+.prof-delete-document-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
 .prof-status-badge,
 .prof-counter {
   display: inline-flex;

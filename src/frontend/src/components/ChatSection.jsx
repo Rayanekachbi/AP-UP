@@ -1,93 +1,133 @@
-// src/frontend/src/components/ChatSection.jsx
-import { useMemo, useState } from "react";
-import {
-  CHAT_CONNECTION_LABEL,
-  sendMessage, // <-- Nouvel import
-} from "../services/chatService";
+import { useEffect, useState } from "react";
+import { getChatHistory, sendChatMessage } from "../services/chatService";
 import "../styles/ChatSection.css";
 
 export default function ChatSection({
+  user,
   selectedModule,
   question,
   setQuestion,
-  onSuggestionClick,
   role,
-  user, // <-- Ajout de 'user' dans les props pour avoir son ID
 }) {
   const [messages, setMessages] = useState([]);
-  const [loading, setLoading] = useState(false); // <-- Véritable état de chargement
+  const [loading, setLoading] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
-  const moduleMessages = useMemo(() => {
-    return messages.filter((message) => {
-      return String(message.moduleId) === String(selectedModule.id);
-    });
-  }, [messages, selectedModule.id]);
+  function createMessage({ id, sender, text }) {
+    return {
+      id,
+      sender,
+      text,
+      moduleName: selectedModule.nom,
+      role,
+    };
+  }
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadHistory() {
+      if (!user?.id || !selectedModule?.id) {
+        return;
+      }
+
+      setHistoryLoading(true);
+
+      try {
+        const history = await getChatHistory({
+          utilisateurId: user.id,
+          moduleId: selectedModule.id,
+        });
+
+        if (ignore) {
+          return;
+        }
+
+        const historyMessages = history.flatMap((entry) => {
+          return [
+            createMessage({
+              id: `history-${entry.id}-user`,
+              sender: "user",
+              text: entry.question,
+            }),
+            createMessage({
+              id: `history-${entry.id}-assistant`,
+              sender: "assistant",
+              text: entry.reponse,
+            }),
+          ];
+        });
+
+        setMessages(historyMessages);
+      } catch {
+      } finally {
+        if (!ignore) {
+          setHistoryLoading(false);
+        }
+      }
+    }
+
+    loadHistory();
+
+    return () => {
+      ignore = true;
+    };
+  }, [role, selectedModule.id, selectedModule.nom, user?.id]);
 
   const handleSend = async () => {
     const trimmedQuestion = question.trim();
-    
-    if (!trimmedQuestion || loading) {
+
+    if (!trimmedQuestion || loading || historyLoading) {
       return;
     }
 
+    const messageTimestamp = Date.now();
     const moduleId = String(selectedModule.id);
-    const timestamp = Date.now();
+    const userMessage = createMessage({
+      id: `${moduleId}-${messageTimestamp}-user`,
+      sender: "user",
+      text: trimmedQuestion,
+    });
 
-    // Ajouter le message utilisateur immédiatement
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `${moduleId}-${timestamp}-user`,
-        sender: "user",
-        text: trimmedQuestion,
-        moduleId,
-        moduleName: selectedModule.name,
-        role,
-      },
-    ]);
-    
+    setMessages((currentMessages) => [...currentMessages, userMessage]);
     setQuestion("");
     setLoading(true);
 
-    // Interroger l'API Backend
     try {
-      const data = await sendMessage({
-        utilisateur_id: user.id, // Nécessite que 'user' soit passé en prop
-        module_id: selectedModule.id,
+      const response = await sendChatMessage({
+        utilisateurId: user.id,
+        moduleId: selectedModule.id,
         question: trimmedQuestion,
       });
 
-      // Ajouter la réponse de l'assistant
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `${moduleId}-${timestamp}-assistant`,
+      setMessages((currentMessages) => [
+        ...currentMessages,
+        createMessage({
+          id: `${moduleId}-${messageTimestamp}-assistant`,
           sender: "assistant",
-          text: data.reponse,
-          moduleId,
-          moduleName: selectedModule.name,
-        },
+          text: response.reponse,
+        }),
       ]);
-    } catch (err) {
-      // Gérer l'erreur proprement
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `${moduleId}-${timestamp}-error`,
+    } catch (error) {
+      setMessages((currentMessages) => [
+        ...currentMessages,
+        createMessage({
+          id: `${moduleId}-${messageTimestamp}-error`,
           sender: "assistant",
-          text: "Une erreur est survenue. Veuillez réessayer.",
-          moduleId,
-          moduleName: selectedModule.name,
-        },
+          text:
+            error instanceof Error
+              ? error.message
+              : "Impossible d'obtenir une réponse.",
+        }),
       ]);
     } finally {
       setLoading(false);
     }
   };
 
-  const hasMessages = moduleMessages.length > 0;
-  const hasSuggestions = selectedModule.suggestions && selectedModule.suggestions.length > 0;
-  const canSend = !loading; 
+  const hasMessages = messages.length > 0;
+  const showLoadingState = loading || historyLoading;
+  const canSend = !showLoadingState && question.trim().length > 0;
 
   return (
     <section className="chat-section">
@@ -105,7 +145,7 @@ export default function ChatSection({
               placeholder="Poser une question"
               className="question-input"
               value={question}
-              disabled={loading}
+              aria-busy={showLoadingState}
               onChange={(e) => setQuestion(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleSend();
@@ -120,29 +160,17 @@ export default function ChatSection({
             </button>
           </div>
 
-          <p className={`chat-status ${canSend ? "ready" : "pending"}`}>
-            {loading ? "Connexion au modèle..." : CHAT_CONNECTION_LABEL}
-          </p>
-
-          {hasSuggestions ? (
-            <div className="suggestions">
-              {selectedModule.suggestions.map((suggestion, index) => (
-                <p key={index} onClick={() => onSuggestionClick(suggestion)}>
-                  {suggestion}
-                </p>
-              ))}
-            </div>
-          ) : (
-            <p className="chat-empty-note">
-              Aucune suggestion disponible.
+          {showLoadingState ? (
+            <p className="chat-status pending">
+              {historyLoading ? "Chargement de l'historique..." : "Réponse en cours..."}
             </p>
-          )}
+          ) : null}
         </div>
       ) : (
         <div className="chat-active-state">
           <div className="chat-messages">
             <div className="chat-messages-inner">
-              {moduleMessages.map((message) => (
+              {messages.map((message) => (
                 <div
                   key={message.id}
                   className={`message-row ${
@@ -160,15 +188,6 @@ export default function ChatSection({
                   </div>
                 </div>
               ))}
-              {loading && (
-                <div className="message-row assistant">
-                  <div className="message-stack">
-                    <div className="message-bubble assistant typing-indicator">
-                      ...
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
 
@@ -178,7 +197,7 @@ export default function ChatSection({
               placeholder="Poser une question"
               className="question-input"
               value={question}
-              disabled={loading}
+              aria-busy={showLoadingState}
               onChange={(e) => setQuestion(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleSend();
@@ -193,9 +212,11 @@ export default function ChatSection({
             </button>
           </div>
 
-          <p className={`chat-status ${canSend ? "ready" : "pending"}`}>
-            {loading ? "Génération en cours..." : CHAT_CONNECTION_LABEL}
-          </p>
+          {showLoadingState ? (
+            <p className="chat-status pending">
+              {historyLoading ? "Chargement de l'historique..." : "Réponse en cours..."}
+            </p>
+          ) : null}
         </div>
       )}
     </section>

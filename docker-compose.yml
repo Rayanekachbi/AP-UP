@@ -25,6 +25,7 @@ services:
       LLM_BASE_URL: http://host.docker.internal:11434/v1
     volumes:
       - ./data:/app/data
+      - ./src:/app/src
 
   frontend:
     build:

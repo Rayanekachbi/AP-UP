@@ -1,8 +1,0 @@
-{
-  "systemPromptTemplate": "Vous êtes un assistant IA conçu pour aider les étudiants uniquement à partir des documents de cours déposés pour chaque module. Si une information n'est pas présente dans ces documents, indiquez-le clairement et n'inventez pas de réponse.",
-  "uploadedDocuments": [],
-  "emptyDocumentsMessage": {
-    "title": "Aucun document disponible.",
-    "description": "La liste des documents sera connectée à la base de données plus tard."
-  }
-}

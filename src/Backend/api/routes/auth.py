@@ -1,13 +1,26 @@
+import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from src.Backend.api.dependencies import get_database_session
 from src.Backend.api.schemas import LoginRequest, UserResponse
-from src.Backend.api.security import verify_password
-
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def verify_password(password: str, stored_password: str) -> bool:
+    return bcrypt.checkpw(
+        password.encode("utf-8"),
+        stored_password.encode("utf-8"),
+    )
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(
+        password.encode("utf-8"),
+        bcrypt.gensalt(),
+    ).decode("utf-8")
 
 
 @router.post("/login", response_model=UserResponse)

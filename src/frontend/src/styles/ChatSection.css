@@ -25,14 +25,6 @@
   line-height: 1.2;
 }
 
-.chat-empty-note {
-  margin: 0 0 24px;
-  color: #606574;
-  font-size: 15px;
-  line-height: 1.5;
-  text-align: center;
-}
-
 .question-box {
   width: 100%;
   display: flex;
@@ -86,22 +78,6 @@
 
 .chat-status.pending {
   color: #7b4556;
-}
-
-.suggestions {
-  width: 100%;
-  margin-top: 18px;
-}
-
-.suggestions p {
-  font-size: 16px;
-  color: #4b4b4b;
-  margin: 12px 8px;
-  cursor: pointer;
-}
-
-.suggestions p:hover {
-  text-decoration: underline;
 }
 
 .chat-active-state {

@@ -4,7 +4,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.Backend.api.routes import auth, chat, database, ingestion
 from src.config.settings import FRONTEND_URL
 
-
 app = FastAPI(
     title="AP UP API",
     description="Premiere version simple de l'API pour connecter le frontend.",

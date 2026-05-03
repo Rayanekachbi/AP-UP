@@ -4,47 +4,25 @@ import Sidebar from "../components/Sidebar";
 import ProfileMenu from "../components/ProfileMenu";
 import ChatSection from "../components/ChatSection";
 import { ROUTES } from "../routes/paths";
+import { clearChatHistory } from "../services/chatService";
 import { getModules } from "../services/moduleService";
-import { getAuthenticatedUser } from "../services/authService";
+import { getUploadedDocuments } from "../services/professorDashboardService";
 import "../styles/MainWorkspace.css";
 
 export default function WorkspacePage({ user, onLogout }) {
   const navigate = useNavigate();
-  
-  // Déclaration des nouveaux états pour les données de l'API
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [modulesData, setModulesData] = useState([]);
+  const [documentsData, setDocumentsData] = useState([]);
   const [selectedModule, setSelectedModule] = useState(null);
   const [expandedModuleId, setExpandedModuleId] = useState(null);
-  
-  // Les autres états de ton interface
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [modulesError, setModulesError] = useState("");
+  const [modulesLoading, setModulesLoading] = useState(true);
   const [question, setQuestion] = useState("");
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
 
   const profileMenuRef = useRef(null);
 
-  // nouveau useEffect pour charger les modules au démarrage
-  useEffect(() => {
-    getModules().then((data) => {
-      // Adapter nom → name pour la Sidebar
-      const adapted = data.map((m) => ({ 
-        ...m, 
-        name: m.nom, 
-        files: [], 
-        suggestions: [] 
-      }));
-      
-      setModulesData(adapted);
-      
-      // Sélectionner le premier module par défaut s'il y en a
-      if (adapted.length > 0) {
-        setSelectedModule(adapted[0]);
-        setExpandedModuleId(adapted[0].id);
-      }
-    }).catch(err => console.error("Erreur de chargement des modules:", err));
-  }, []);
-
-  // Gestion du clic en dehors du menu profil
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (
@@ -58,6 +36,68 @@ export default function WorkspacePage({ user, onLogout }) {
     document.addEventListener("mousedown", handleClickOutside);
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadDocuments() {
+      try {
+        const documents = await getUploadedDocuments();
+
+        if (!ignore) {
+          setDocumentsData(documents);
+        }
+      } catch {
+        if (!ignore) {
+          setDocumentsData([]);
+        }
+      }
+    }
+
+    loadDocuments();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadModules() {
+      try {
+        setModulesLoading(true);
+        setModulesError("");
+        const modules = await getModules();
+
+        if (ignore) {
+          return;
+        }
+
+        setModulesData(modules);
+        setSelectedModule(modules[0] || null);
+        setExpandedModuleId(modules[0]?.id || null);
+      } catch (error) {
+        if (!ignore) {
+          setModulesError(
+            error instanceof Error
+              ? error.message
+              : "Impossible de charger les cours."
+          );
+        }
+      } finally {
+        if (!ignore) {
+          setModulesLoading(false);
+        }
+      }
+    }
+
+    loadModules();
+
+    return () => {
+      ignore = true;
     };
   }, []);
 
@@ -75,17 +115,8 @@ export default function WorkspacePage({ user, onLogout }) {
     setExpandedModuleId((prev) => (prev === moduleId ? null : moduleId));
   };
 
-  const handleSuggestionClick = (suggestion) => {
-    setQuestion(suggestion);
-  };
-
   const handleToggleProfileMenu = () => {
     setProfileMenuOpen((prev) => !prev);
-  };
-
-  const handleViewProfile = () => {
-    alert("Le profil sera connecté au backend lors de l'intégration.");
-    setProfileMenuOpen(false);
   };
 
   const handleOpenProfessorAdminPanel = () => {
@@ -93,15 +124,27 @@ export default function WorkspacePage({ user, onLogout }) {
     navigate(ROUTES.professorAdmin);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setProfileMenuOpen(false);
+    try {
+      await clearChatHistory(user.id);
+    } catch {
+      // On deconnecte quand meme l'utilisateur meme si la suppression echoue.
+    }
     onLogout();
     navigate(ROUTES.login, { replace: true });
   };
 
-  // Tant que l'API n'a pas répondu, on n'affiche rien (ou on pourrait mettre un loader)
+  if (modulesLoading) {
+    return <div className="dashboard-page">Chargement des cours...</div>;
+  }
+
+  if (modulesError) {
+    return <div className="dashboard-page">{modulesError}</div>;
+  }
+
   if (!selectedModule) {
-    return <div className="dashboard-page">Chargement des modules...</div>;
+    return <div className="dashboard-page">Aucun cours disponible.</div>;
   }
 
   return (
@@ -111,6 +154,7 @@ export default function WorkspacePage({ user, onLogout }) {
         selectedModule={selectedModule}
         expandedModuleId={expandedModuleId}
         modules={modulesData}
+        documents={documentsData}
         onToggleSidebar={handleToggleSidebar}
         onSelectModule={handleSelectModule}
         onToggleModule={handleToggleModule}
@@ -120,26 +164,24 @@ export default function WorkspacePage({ user, onLogout }) {
       <main className="dashboard-main">
         <header className="topbar">
           <div className="topbar-left"></div>
-          <h1 className="topbar-title">Cours: {selectedModule.name}</h1>
+          <h1 className="topbar-title">Cours: {selectedModule.nom}</h1>
 
           <ProfileMenu
             user={user}
             profileMenuOpen={profileMenuOpen}
             profileMenuRef={profileMenuRef}
             onToggleProfileMenu={handleToggleProfileMenu}
-            onViewProfile={handleViewProfile}
             onOpenProfessorAdminPanel={handleOpenProfessorAdminPanel}
             onLogout={handleLogout}
           />
         </header>
 
-        <ChatSection 
-          selectedModule={selectedModule} 
-          question={question} 
-          setQuestion={setQuestion} 
-          onSuggestionClick={handleSuggestionClick} 
-          role={user?.role} /* <-- J'ai corrigé userRole ici */
-          user={user} 
+        <ChatSection
+          user={user}
+          selectedModule={selectedModule}
+          question={question}
+          setQuestion={setQuestion}
+          role={user?.role}
         />
       </main>
     </div>

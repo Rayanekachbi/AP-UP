@@ -27,6 +27,17 @@ class ModuleResponse(BaseModel):
     id: int
     nom: str
     description: str | None = None
+    system_prompt: str | None = None
+
+
+class ModulePromptRequest(BaseModel):
+    system_prompt: str
+
+
+class ModulePromptResponse(BaseModel):
+    id: int
+    nom: str
+    system_prompt: str | None = None
 
 
 class ChatMessageRequest(BaseModel):
@@ -42,6 +53,15 @@ class ChatMessageResponse(BaseModel):
     question: str
     reponse: str
     chunks_sources: str | None = None
+
+
+class ChatHistoryEntryResponse(BaseModel):
+    id: int
+    utilisateur_id: int
+    module_id: int
+    question: str
+    reponse: str
+    date_heure: str
 
 
 class DocumentUploadResponse(BaseModel):

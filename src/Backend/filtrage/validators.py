@@ -1,248 +1,206 @@
 # ============================================================
-# validators.py - Module 5 : Filtrage et Sécurité
-# Contient : FilterResult, InputValidator, OutputValidator
+# validators.py - SLM (ministral-3:3b) + COSINE STABLE
 # ============================================================
 
+import re
+import logging
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from openai import OpenAI
+
 from src.config.settings import (
-    SIMILARITY_THRESHOLD_IN,
     SIMILARITY_THRESHOLD_OUT_HIGH,
     SIMILARITY_THRESHOLD_OUT_LOW,
     SLM_CONFIDENCE_THRESHOLD,
     SLM_MODEL,
     OLLAMA_BASE_URL,
     MESSAGE_QUESTION_BLOQUEE,
-    MESSAGE_REPONSE_BLOQUEE
+    MESSAGE_REPONSE_BLOQUEE,
+    EMBEDDING_MODEL,
+    SIMILARITY_THRESHOLD_IN,
+    COSINE_OVERRIDE_THRESHOLD,
 )
+
+logger = logging.getLogger(__name__)
+
+SYSTEM_CLASSIFIEUR = "Tu es un classifieur binaire. Reponds uniquement OUI ou NON sans rien ajouter."
 
 
 # ============================================================
-# CLASSE 1 : FilterResult
-# C'est la "boîte résultat" retournée par chaque validation
+# RESULT
 # ============================================================
 
 class FilterResult:
-    def __init__(self, is_valid: bool, reason: str, score: float, method: str):
-        # True si la validation est passée, False si bloquée
+    def __init__(self, is_valid, reason, score, method, response=""):
         self.is_valid = is_valid
-
-        # Explication du blocage (vide si valide)
         self.reason = reason
-
-        # Score obtenu (similarité cosinus ou confiance SLM)
         self.score = score
-
-        # Qui a pris la décision : "cosine" ou "slm"
         self.method = method
-
-    def __repr__(self):
-        return (
-            f"FilterResult("
-            f"is_valid={self.is_valid}, "
-            f"score={self.score:.2f}, "
-            f"method={self.method}, "
-            f"reason='{self.reason}')"
-        )
+        self.response = response
 
 
 # ============================================================
-# CLASSE 2 : InputValidator
-# Vérifie que la question est liée au corpus du module
+# INPUT VALIDATOR (SLM + fallback cosine)
 # ============================================================
 
 class InputValidator:
-    def __init__(self):
-        # On charge le modèle qui transforme le texte en vecteur
-        from src.config.settings import EMBEDDING_MODEL
-        self.model = SentenceTransformer(EMBEDDING_MODEL)
-    
-    def _cosine_similarity(self, vec1: list, vec2: list) -> float:
-        """
-        Calcule la similarité cosinus entre deux vecteurs.
-        Retourne un score entre 0 et 1.
-        0 = rien à voir / 1 = identiques
-        """
-        v1 = np.array(vec1)
-        v2 = np.array(vec2)
-        return float(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
 
-    def _compute_centroid(self, chunk_vectors: list) -> list:
-        """
-        Calcule le vecteur centroïde = moyenne de tous les vecteurs des chunks.
-        C'est le vecteur qui représente l'ensemble du corpus du module.
-        """
-        return np.mean(chunk_vectors, axis=0).tolist()
+    def __init__(self, model: SentenceTransformer = None):
+        self.model = model or SentenceTransformer(EMBEDDING_MODEL)
+        self.client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 
-    def validate(self, question: str, chunk_vectors: list) -> FilterResult:
-        """
-        Valide la question en la comparant au centroïde du corpus.
+    def cosine(self, a, b):
+        a = np.array(a)
+        b = np.array(b)
+        return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-9))
 
-        Paramètres :
-        - question      : le texte de la question posée par l'étudiant
-        - chunk_vectors : liste des vecteurs de tous les chunks du module
+    def centroid(self, vecs):
+        return np.mean(vecs, axis=0)
 
-        Retourne un FilterResult.
-        """
+    def build_prompt(self, q, chunks):
+        text = "\n".join(f"[{i+1}] {c.get('text', '')[:300]}" for i, c in enumerate(chunks[:5]))
+        return (
+            f"Voici des extraits d un cours :\n{text}\n\n"
+            f"La question suivante porte-t-elle sur un sujet aborde dans ces extraits ?\n"
+            f"Question : {q}\n"
+            f"Reponds OUI si la question concerne un concept present dans les extraits, NON sinon."
+        )
 
-        # Étape 1 : transformer la question en vecteur
-        question_vector = self.model.encode(question).tolist()
+    def parse(self, text):
+        upper = text.upper()
+        decision = "OUI" if "OUI" in upper else "NON"
+        match = re.search(r"\b(0\.\d+|1\.0)\b", text)
+        score = float(match.group()) if match else 0.5
+        return decision == "OUI", score
 
-        # Étape 2 : calculer le centroïde du corpus
-        centroid = self._compute_centroid(chunk_vectors)
-
-        # Étape 3 : calculer la similarité cosinus
-        score = self._cosine_similarity(question_vector, centroid)
-
-        # Étape 4 : décision selon le seuil
-        if score >= SIMILARITY_THRESHOLD_IN:
-            # Question acceptée
-            return FilterResult(
-                is_valid=True,
-                reason="",
-                score=score,
-                method="cosine"
+    def validate(self, question, chunk_vectors, chunks_preview):
+        try:
+            resp = self.client.chat.completions.create(
+                model=SLM_MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_CLASSIFIEUR},
+                    {"role": "user", "content": self.build_prompt(question, chunks_preview)},
+                ],
+                temperature=0,
+                max_tokens=3,
             )
-        else:
-            # Question bloquée
-            return FilterResult(
-                is_valid=False,
-                reason=MESSAGE_QUESTION_BLOQUEE,
-                score=score,
-                method="cosine"
-            )
+
+            slm_text = resp.choices[0].message.content
+            logger.debug("SLM raw input response: %r", slm_text)
+            is_valid, conf = self.parse(slm_text)
+            logger.debug("SLM input → %s (conf=%.3f)", "OUI" if is_valid else "NON", conf)
+
+            q_vec = self.model.encode(question)
+            c_vec = self.centroid(chunk_vectors)
+            cosine = self.cosine(q_vec, c_vec)
+            logger.debug("Cosine input = %.3f", cosine)
+
+            if is_valid and conf >= SLM_CONFIDENCE_THRESHOLD:
+                return FilterResult(True, "", conf, "slm")
+
+            if cosine > COSINE_OVERRIDE_THRESHOLD:
+                logger.debug("Cosine override (%.3f > %.3f)", cosine, COSINE_OVERRIDE_THRESHOLD)
+                return FilterResult(True, "", cosine, "cosine_override")
+
+            return FilterResult(False, MESSAGE_QUESTION_BLOQUEE, conf, "slm")
+
+        except Exception as e:
+            logger.warning("SLM indisponible, fallback cosine : %s", e)
+            return self._fallback(question, chunk_vectors)
+
+    def _fallback(self, question, chunk_vectors):
+        if not chunk_vectors:
+            return FilterResult(False, MESSAGE_QUESTION_BLOQUEE, 0.0, "cosine")
+        q = self.model.encode(question)
+        c = np.mean(chunk_vectors, axis=0)
+        score = float(np.dot(q, c) / (np.linalg.norm(q) * np.linalg.norm(c) + 1e-9))
+        return FilterResult(
+            score > SIMILARITY_THRESHOLD_IN,
+            MESSAGE_QUESTION_BLOQUEE,
+            score,
+            "cosine"
+        )
 
 
 # ============================================================
-# CLASSE 3 : OutputValidator
-# Vérifie que la réponse générée est ancrée dans le cours
+# OUTPUT VALIDATOR (cosine + SLM zone grise)
 # ============================================================
 
 class OutputValidator:
-    def __init__(self):
-        # Modèle pour transformer le texte en vecteur
-        from src.config.settings import EMBEDDING_MODEL
-        self.model = SentenceTransformer(EMBEDDING_MODEL)
-        
-        # Client pour appeler le SLM via Ollama (utilisé uniquement en zone grise)
-        self.slm_client = OpenAI(
-            base_url=OLLAMA_BASE_URL,
-            api_key="ollama"  # Ollama n'a pas besoin de vraie clé API
-        )
 
-    def _cosine_similarity(self, vec1: list, vec2: list) -> float:
-        """
-        Calcule la similarité cosinus entre deux vecteurs.
-        Retourne un score entre 0 et 1.
-        """
-        v1 = np.array(vec1)
-        v2 = np.array(vec2)
-        return float(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
+    def __init__(self, model: SentenceTransformer = None):
+        self.model = model or SentenceTransformer(EMBEDDING_MODEL)
+        self.client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 
-    def _compute_centroid(self, chunk_vectors: list) -> list:
-        """
-        Calcule le vecteur centroïde des chunks sources.
-        """
-        return np.mean(chunk_vectors, axis=0).tolist()
+    def cosine(self, a, b):
+        a = np.array(a)
+        b = np.array(b)
+        return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-9))
 
-    def _build_slm_prompt(self, response: str, chunks: list) -> str:
-        """
-        Construit le prompt envoyé au SLM pour évaluer la réponse.
-        """
+    def _build_slm_prompt(self, response, chunks):
         chunks_text = ""
-        #ici chunks est une liste de dictionnaires, et la boucle transforme cette liste en une seule 
-        #chaine de texte que le SLM veut peut lire
         for i, chunk in enumerate(chunks, start=1):
-            chunks_text += f"[{i}] {chunk['text']}\n\n"
-
-        prompt = (
-            "Tu es un évaluateur de fidélité. Voici des passages extraits d'un cours :\n\n"
-            f"{chunks_text}"
-            f"Voici une réponse générée : {response}\n\n"
-            "Cette réponse est-elle fidèle et ancrée dans les passages fournis ?\n"
-            "Réponds uniquement par OUI ou NON, suivi d'un score de confiance entre 0 et 1.\n"
-            "Exemple : OUI 0.85 ou NON 0.32"
-        )
-        return prompt
-
-    def _call_slm(self, response: str, chunks: list) -> tuple:
-        """
-        Appelle le SLM pour évaluer la réponse dans la zone grise.
-        Retourne un tuple (décision: bool, confiance: float).
-        """
-        prompt = self._build_slm_prompt(response, chunks)
-
-        slm_response = self.slm_client.chat.completions.create(
-            model=SLM_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=20,      # On n'a besoin que de "OUI 0.85" ou "NON 0.32"
-            temperature=0.0     # Pas de créativité, on veut une réponse précise
+            texte = chunk.get("text", chunk.get("texte", ""))
+            chunks_text += f"[{i}] {texte[:300]}\n\n"
+        return (
+            f"Voici des extraits d un cours :\n{chunks_text}"
+            f"Voici une reponse generee : {response[:500]}\n\n"
+            f"La reponse est-elle fidele et ancree dans les extraits du cours ?\n"
+            f"Reponds OUI si la reponse s appuie sur les extraits, NON sinon."
         )
 
-        # Récupérer la réponse du SLM (ex: "OUI 0.85")
-        slm_text = slm_response.choices[0].message.content.strip().upper()
+    def _call_slm(self, response, chunks):
+        try:
+            resp = self.client.chat.completions.create(
+                model=SLM_MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_CLASSIFIEUR},
+                    {"role": "user", "content": self._build_slm_prompt(response, chunks)},
+                ],
+                max_tokens=3,
+                temperature=0.0,
+            )
+            slm_text = resp.choices[0].message.content
+            logger.debug("SLM output raw: %r", slm_text)
+            upper = slm_text.upper()
+            decision = "OUI" if "OUI" in upper else "NON"
+            match = re.search(r"\b(0\.\d+|1\.0)\b", slm_text)
+            confidence = float(match.group()) if match else 0.5
+            return decision == "OUI", confidence
+        except Exception as e:
+            logger.warning("SLM output indisponible : %s", e)
+            return True, 0.5
 
-        # Extraire la décision et le score de confiance
-        parts = slm_text.split()
-        decision = parts[0]                                          # "OUI" ou "NON"
-        confidence = float(parts[1]) if len(parts) > 1 else 0.0     # 0.85
+    def validate(self, response, chunks):
 
-        is_valid = (decision == "OUI" and confidence >= SLM_CONFIDENCE_THRESHOLD)
-        return is_valid, confidence
+        vectors = []
+        for c in chunks:
+            v = c.get("vector")
+            if v is None:
+                v = c.get("embedding")
+            if v is not None:
+                vectors.append(np.array(v))
 
-    def validate(self, response: str, chunks: list) -> FilterResult:
-        """
-        Valide la réponse générée en la comparant aux chunks sources.
+        if not vectors:
+            return FilterResult(False, MESSAGE_REPONSE_BLOQUEE, 0.0, "no_vectors")
 
-        Paramètres :
-        - response : le texte de la réponse générée par le LLM
-        - chunks   : liste des chunks sources avec leurs textes et vecteurs
+        r = self.model.encode(response)
+        c = np.mean(vectors, axis=0)
+        score = self.cosine(r, c)
+        logger.debug("Cosine output = %.3f", score)
 
-        Retourne un FilterResult.
-        """
-
-        # Étape 1 : transformer la réponse en vecteur
-        response_vector = self.model.encode(response).tolist()
-
-        # Étape 2 : récupérer les vecteurs des chunks sources
-        chunk_vectors = [chunk["vector"] for chunk in chunks]
-
-        # Étape 3 : calculer le centroïde des chunks
-        centroid = self._compute_centroid(chunk_vectors)
-
-        # Étape 4 : calculer la similarité cosinus
-        score = self._cosine_similarity(response_vector, centroid)
-
-        # --------------------------------------------------------
-        # Étape 5 : décision selon les seuils
-        # --------------------------------------------------------
-
-        # CAS 1 : score élevé → réponse bien ancrée → validée directement
         if score >= SIMILARITY_THRESHOLD_OUT_HIGH:
-            return FilterResult(
-                is_valid=True,
-                reason="",
-                score=score,
-                method="cosine"
-            )
+            return FilterResult(True, "", score, "cosine")
 
-        # CAS 2 : score très bas → réponse hallucinée → bloquée directement
-        elif score < SIMILARITY_THRESHOLD_OUT_LOW:
-            return FilterResult(
-                is_valid=False,
-                reason=MESSAGE_REPONSE_BLOQUEE,
-                score=score,
-                method="cosine"
-            )
+        if score < SIMILARITY_THRESHOLD_OUT_LOW:
+            return FilterResult(False, MESSAGE_REPONSE_BLOQUEE, score, "cosine")
 
-        # CAS 3 : zone grise → on demande au SLM de trancher
-        else:
-            is_valid, confidence = self._call_slm(response, chunks)
-
-            return FilterResult(
-                is_valid=is_valid,
-                reason="" if is_valid else MESSAGE_REPONSE_BLOQUEE,
-                score=confidence,
-                method="slm"
-            )
+        # Zone grise → SLM
+        logger.debug("Zone grise output (%.3f), appel SLM...", score)
+        is_valid, confidence = self._call_slm(response, chunks)
+        return FilterResult(
+            is_valid,
+            "" if is_valid else MESSAGE_REPONSE_BLOQUEE,
+            confidence,
+            "slm"
+        )

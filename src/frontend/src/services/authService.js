@@ -1,45 +1,86 @@
-// src/frontend/src/services/authService.js
-import { buildApiUrl, ApiError } from "./apiClient";
-
 const SESSION_STORAGE_KEY = "ap-up-auth-user";
+const API_BASE_URL = "http://localhost:8000";
+
+const storage = {
+  getItem(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  setItem(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      console.warn(
+        "Impossible d'enregistrer l'état d'authentification dans localStorage."
+      );
+    }
+  },
+  removeItem(key) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      console.warn(
+        "Impossible d'effacer l'état d'authentification depuis localStorage."
+      );
+    }
+  },
+};
 
 export async function loginUser({ email, password }) {
-  const response = await fetch(buildApiUrl("/auth/login"), {
+  const response = await fetch(`${API_BASE_URL}/auth/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      email,
+      password,
+    }),
   });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.detail || "Email ou mot de passe incorrect.");
+  let user = null;
+
+  try {
+    user = await response.json();
+  } catch {
+    user = null;
   }
 
-  const user = await response.json();
+  if (!response.ok) {
+    throw new Error(user?.detail || "Email ou mot de passe incorrect.");
+  }
 
-  // Adapter le format : l'API retourne { id, nom, prenom, email, role }
-  const sanitized = {
-    id: user.id,
-    email: user.email,
-    name: `${user.prenom} ${user.nom}`,
-    role: user.role,
-  };
-
-  localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sanitized));
-  return sanitized;
+  storage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));
+  return user;
 }
 
 export function getAuthenticatedUser() {
+  const storedUser = storage.getItem(SESSION_STORAGE_KEY);
+
+  if (!storedUser) {
+    return null;
+  }
+
   try {
-    const stored = localStorage.getItem(SESSION_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : null;
+    const user = JSON.parse(storedUser);
+
+    if (!user.nom || !user.prenom || !user.email || !user.role) {
+      storage.removeItem(SESSION_STORAGE_KEY);
+      return null;
+    }
+
+    return user;
   } catch {
+    storage.removeItem(SESSION_STORAGE_KEY);
     return null;
   }
 }
 
 export function clearAuthenticatedUser() {
-  localStorage.removeItem(SESSION_STORAGE_KEY);
+  storage.removeItem(SESSION_STORAGE_KEY);
 }
 
 export function canAccessProfessorDashboard(user) {

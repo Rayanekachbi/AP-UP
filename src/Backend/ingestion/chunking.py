@@ -201,10 +201,11 @@ def _enrichir_metadonnees(
     Associe les métadonnées à chaque chunk :
     - source      : nom du fichier
     - page        : numéro de page détecté
-    - section     : titre de section Markdown détecté
+    - section     : titre de section Markdown détecté (ou hérité du chunk précédent)
     - chunk_index : numéro d'ordre dans le document
     """
     chunks_finaux = []
+    derniere_section_connue = None  # propagation de section aux chunks sans titre
 
     for index, chunk in enumerate(chunks):
 
@@ -213,6 +214,12 @@ def _enrichir_metadonnees(
 
         # Détecter le titre de section Markdown
         section = _extraire_section(chunk)
+
+        # Si pas de titre dans ce chunk, hériter de la dernière section connue
+        if section is not None:
+            derniere_section_connue = section
+        else:
+            section = derniere_section_connue
 
         chunks_finaux.append({
             "texte": chunk,

@@ -33,7 +33,7 @@ DATA_DIR = "data"  # répertoire des documents uploadés
 # se trouve dans les settings de mounir
 SIMILARITY_THRESHOLD_OUT_HIGH = 0.50
 SIMILARITY_THRESHOLD_OUT_LOW = 0.30
-SLM_MODEL = "mistral"
+SLM_MODEL = "ministral-3:3b"
 OLLAMA_BASE_URL = "http://host.docker.internal:11434/v1"
 MESSAGE_QUESTION_BLOQUEE = "Votre question ne semble pas liée au contenu du module sélectionné. Veuillez reformuler ou choisir un autre module."
 MESSAGE_REPONSE_BLOQUEE = "La réponse générée ne peut pas être fournie car elle ne semble pas ancrée dans le contenu du cours."
@@ -42,3 +42,6 @@ MESSAGE_REPONSE_BLOQUEE = "La réponse générée ne peut pas être fournie car 
 FRONTEND_URL = "http://localhost:5173"  # Port par défaut de Vite (React)
 
 NB_ECHANGES_HISTORIQUE = 1
+
+# Seuil cosine override (InputValidator) — si cosine > seuil, accepte même si SLM dit NON
+COSINE_OVERRIDE_THRESHOLD = 0.84

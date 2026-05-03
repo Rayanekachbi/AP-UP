@@ -6,15 +6,16 @@ export default function ProfileMenu({
   profileMenuOpen,
   profileMenuRef,
   onToggleProfileMenu,
-  onViewProfile,
   onOpenProfessorAdminPanel,
   onLogout,
 }) {
   const canOpenProfessorDashboard = canAccessProfessorDashboard(user);
+  const fullName = `${user.prenom} ${user.nom}`;
+  const initial = user.prenom?.charAt(0) || user.email.charAt(0);
 
   return (
     <div className="topbar-right" ref={profileMenuRef}>
-      <button className="icon-button">◔</button>
+
 
       <button
         type="button"
@@ -24,33 +25,24 @@ export default function ProfileMenu({
         aria-expanded={profileMenuOpen}
         aria-label="Ouvrir le menu du profil"
       >
-        <div className="profile-circle">{user.name.charAt(0)}</div>
+        <div className="profile-circle">{initial}</div>
       </button>
 
       {profileMenuOpen && (
         <div className="profile-menu" role="menu">
           <div className="profile-menu-header">
-            <div className="profile-menu-avatar">{user.name.charAt(0)}</div>
+            <div className="profile-menu-avatar">{initial}</div>
             <div>
-              <p className="profile-menu-name">{user.name}</p>
+              <p className="profile-menu-name">{fullName}</p>
               <p className="profile-menu-email">{user.email}</p>
               <p className="profile-menu-role">{user.role}</p>
             </div>
           </div>
 
-          <button
-            type="button"
-            className="profile-menu-item"
-            onClick={onViewProfile}
-            role="menuitem"
-          >
-            Voir le profil
-          </button>
-
           {canOpenProfessorDashboard ? (
             <button
               type="button"
-              className="profile-menu-item profile-menu-item-accent"
+              className="profile-menu-item profile-menu-item-admin"
               onClick={onOpenProfessorAdminPanel}
               role="menuitem"
             >
@@ -60,7 +52,7 @@ export default function ProfileMenu({
 
           <button
             type="button"
-            className="profile-menu-item profile-menu-item-danger"
+            className="profile-menu-item profile-menu-item-logout"
             onClick={onLogout}
             role="menuitem"
           >

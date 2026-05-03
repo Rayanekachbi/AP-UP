@@ -81,11 +81,11 @@
   background: #f5f5f5;
 }
 
-.profile-menu-item-accent {
+.profile-menu-item-admin {
   color: #8f123f;
   font-weight: 600;
 }
 
-.profile-menu-item-danger {
+.profile-menu-item-logout {
   color: #8f123f;
 }

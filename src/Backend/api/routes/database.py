@@ -5,10 +5,11 @@ from sqlalchemy.orm import Session
 from src.Backend.api.dependencies import get_database_session
 from src.Backend.api.schemas import (
     DatabaseMessageResponse,
+    ModulePromptRequest,
+    ModulePromptResponse,
     ModuleResponse,
     PasswordMigrationResponse,
 )
-from src.Backend.api.security import hash_password, password_needs_hash
 
 
 router = APIRouter(prefix="/database", tags=["database"])
@@ -34,11 +35,45 @@ def init_database():
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Base de donnees indisponible. Verifiez DATABASE_URL.",
         ) from exc
+
+
+@router.put("/modules/{module_id}/prompt", response_model=ModulePromptResponse)
+def update_module_prompt(
+    module_id: int,
+    payload: ModulePromptRequest,
+    db: Session = Depends(get_database_session),
+):
+    try:
+        from src.Backend.database.models import Module
+
+        module = db.query(Module).filter(Module.id == module_id).first()
+        if module is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Module introuvable.",
+            )
+
+        module.system_prompt = payload.system_prompt.strip() or None
+        db.commit()
+        db.refresh(module)
+
+        return {
+            "id": module.id,
+            "nom": module.nom,
+            "system_prompt": module.system_prompt,
+        }
+    except HTTPException:
+        raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Base de donnees indisponible. Verifiez DATABASE_URL.",
+        ) from exc
         
 @router.get("/modules", response_model=list[ModuleResponse])
 def list_modules(db: Session = Depends(get_database_session)):
     """
-    Exemple database simple :
     l'API lit les modules depuis la table SQLAlchemy `modules`.
     """
     try:
@@ -50,6 +85,7 @@ def list_modules(db: Session = Depends(get_database_session)):
                 "id": module.id,
                 "nom": module.nom,
                 "description": module.description,
+                "system_prompt": module.system_prompt,
             }
             for module in modules
         ]

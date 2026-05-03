@@ -78,18 +78,6 @@ export default function LoginPage({ isAuthenticated, onLogin }) {
               {isSubmitting ? "Connexion..." : "Se connecter"}
             </button>
           </form>
-
-          <p className="login-hint">
-            Compte étudiant : ines@gmail.com / ines
-          </p>
-
-          <p className="login-hint">
-            Compte professeur : prof@gmail.com / prof123
-          </p>
-
-          <p className="signup">
-            Pas encore inscrit ? La création de compte arrive bientôt.
-          </p>
         </div>
       </div>
 

@@ -1,15 +1,18 @@
 from pathlib import Path
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from src.Backend.api.dependencies import get_database_session
-from src.Backend.api.schemas import DocumentResponse, DocumentUploadResponse
-from src.config.settings import DATA_DIR
+from src.Backend.api.schemas import (
+    DatabaseMessageResponse,
+    DocumentResponse,
+    DocumentUploadResponse,
+)
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
+UPLOAD_DIR = Path("data/")
 
 @router.get("/documents", response_model=list[DocumentResponse])
 def list_documents(db: Session = Depends(get_database_session)):
@@ -34,10 +37,13 @@ def list_documents(db: Session = Depends(get_database_session)):
 async def upload_document(
     module_id: int = Form(...),
     enseignant_id: int = Form(...),
+    title: str | None = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_database_session),
 ):
-    file_path = Path(DATA_DIR) / f"{uuid4().hex}_{Path(file.filename or 'document').name}"
+    original_filename = Path(file.filename or "document").name
+    file_path = UPLOAD_DIR / original_filename
+
     try:
         from src.Backend.database.models import Document
         from src.Backend.database.vector_store import inserer_chunk
@@ -48,15 +54,17 @@ async def upload_document(
             raise ValueError("Le fichier envoye est vide.")
 
         module, enseignant = _check_owner(db, module_id, enseignant_id)
-        Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         file_path.write_bytes(content)
 
         chunks, metadata = _process_file(file_path)
         if not chunks:
             raise ValueError("Aucun chunk n'a ete genere depuis ce document.")
 
+        document_title = title.strip() if title and title.strip() else original_filename
+
         document = Document(
-            titre=metadata.get("source", file_path.name),
+            titre=document_title,
             module_id=module.id,
             enseignant_id=enseignant.id,
             chemin_fichier=str(file_path),
@@ -99,6 +107,32 @@ async def upload_document(
         raise _database_error() from exc
 
 
+@router.delete("/documents/{document_id}", response_model=DatabaseMessageResponse)
+def delete_document(document_id: int, db: Session = Depends(get_database_session)):
+    try:
+        from src.Backend.database.models import Chunk, Document
+
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if document is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Document introuvable.",
+            )
+
+        file_path = Path(document.chemin_fichier)
+        db.query(Chunk).filter(Chunk.document_id == document.id).delete()
+        db.delete(document)
+        db.commit()
+        file_path.unlink(missing_ok=True)
+
+        return {"message": "Document supprime."}
+    except HTTPException:
+        raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise _database_error() from exc
+
+
 def _process_file(file_path: Path) -> tuple[list[dict], dict]:
     if file_path.suffix.lower() == ".txt":
         from src.Backend.ingestion.chunking import chunk_text
@@ -107,11 +141,20 @@ def _process_file(file_path: Path) -> tuple[list[dict], dict]:
         metadata = {"source": file_path.name, "format": "txt", "chemin": str(file_path)}
         return chunk_text(text=text, metadata=metadata), metadata
 
-    processor = _choose_processor(file_path)
+    processor = get_processor(file_path)
     return processor.process()
 
 
-def _choose_processor(file_path: Path):
+def get_processor(file_path: str | Path):
+    """
+    Analyse le fichier et retourne le processeur adapte(complexe,simple,...).
+
+    Permet d'utiliser la meme logique que dans les tests :
+    processor = get_processor(path)
+    chunks, metadata = processor.process()
+    """
+    file_path = Path(file_path)
+
     from src.Backend.ingestion.document_processor import DocumentProcessor
 
     detected_type = DocumentProcessor(str(file_path)).detect_type()

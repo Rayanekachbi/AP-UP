@@ -2,6 +2,7 @@
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
 python-multipart>=0.0.9
+bcrypt
 
 # --- Base de données ---
 sqlalchemy>=2.0.0
@@ -19,14 +20,9 @@ pdfplumber>=0.11.0
 docling>=2.0.0
 unstructured[pdf,pptx,docx]>=0.13.0
 openai-whisper>=20231117
+pymupdf
 
 # --- Utilitaires ---
 numpy>=1.26.0
 pydantic>=2.7.0
 pypdf>=4.2.0
-PyMuPDF>=1.23.0
-
-# --- Dépendances de Tests ---
-pytest>=7.4.0
-pytest-mock>=3.11.1  # Indispensable pour notre mock propre de tiktoken
-pytest-cov>=4.1.0    # Pour générer le rapport de couverture

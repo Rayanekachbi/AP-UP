@@ -1,39 +1,138 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ROUTES } from "../routes/paths";
-import { getModules } from "../services/moduleService";
-import { getProfessorDashboardData } from "../services/professorDashboardService";
-import { buildApiUrl } from "../services/apiClient"; // <-- Nouvel import
+import { getModules, updateModulePrompt } from "../services/moduleService";
+import {
+  deleteDocument,
+  getUploadedDocuments,
+  uploadDocument,
+} from "../services/professorDashboardService";
 import "../styles/ProfessorAdminPanel.css";
-
-// On garde le mock uniquement pour les documents affichés et le prompt pour le moment
-const professorDashboardData = getProfessorDashboardData();
 
 export default function ProfessorAdminPage({ user, onLogout }) {
   const navigate = useNavigate();
+  const fullName = `${user.prenom} ${user.nom}`;
+  const initial = user.prenom?.charAt(0) || user.email.charAt(0);
   const [activeTab, setActiveTab] = useState("documents");
-  
-  // Nouveaux états pour gérer les vraies données de l'API
   const [modulesData, setModulesData] = useState([]);
-  const [selectedModuleId, setSelectedModuleId] = useState("");
+  const [documentsData, setDocumentsData] = useState([]);
+  const [selectedCourse, setSelectedCourse] = useState("");
+  const [modulesError, setModulesError] = useState("");
+  const [documentsError, setDocumentsError] = useState("");
+  const [documentsLoading, setDocumentsLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState("");
+  const [customCourse, setCustomCourse] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
-  const [uploading, setUploading] = useState(false); // <-- État de chargement
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [promptSaving, setPromptSaving] = useState(false);
+  const [promptMessage, setPromptMessage] = useState("");
 
-  const [systemPrompt, setSystemPrompt] = useState(
-    professorDashboardData.systemPromptTemplate
+  const courses = useMemo(
+    () => [...new Set(modulesData.map((module) => module.nom))],
+    [modulesData]
   );
 
-  // Charger les modules au démarrage
+  const documentTitle = customCourse.trim() || selectedFile?.name || "";
+  const uploadedDocuments = useMemo(() => {
+    return documentsData.filter((document) => document.course === selectedCourse);
+  }, [documentsData, selectedCourse]);
+  const selectedModule = modulesData.find((module) => module.nom === selectedCourse);
+  const canUpload = Boolean(selectedModule && selectedFile && !uploading);
+
+  async function loadDocuments() {
+    try {
+      setDocumentsLoading(true);
+      setDocumentsError("");
+      const documents = await getUploadedDocuments();
+      setDocumentsData(documents);
+    } catch (error) {
+      setDocumentsError(
+        error instanceof Error
+          ? error.message
+          : "Impossible de charger les documents."
+      );
+    } finally {
+      setDocumentsLoading(false);
+    }
+  }
+
   useEffect(() => {
-    getModules().then((data) => {
-      setModulesData(data);
-      if (data.length > 0) {
-        setSelectedModuleId(data[0].id); // Sélectionner le premier module par défaut
+    let ignore = false;
+
+    async function loadModules() {
+      try {
+        setModulesError("");
+        const modules = await getModules();
+
+        if (ignore) {
+          return;
+        }
+
+        setModulesData(modules);
+        setSelectedCourse(modules[0]?.nom || "");
+      } catch (error) {
+        if (!ignore) {
+          setModulesError(
+            error instanceof Error
+              ? error.message
+              : "Impossible de charger les cours."
+          );
+        }
       }
-    }).catch(err => console.error("Erreur de chargement des modules:", err));
+    }
+
+    loadModules();
+
+    return () => {
+      ignore = true;
+    };
   }, []);
 
-  const uploadedDocuments = professorDashboardData.uploadedDocuments;
+  useEffect(() => {
+    if (!selectedModule) {
+      return;
+    }
+
+    setSystemPrompt(selectedModule.system_prompt || "");
+    setPromptMessage("");
+  }, [selectedModule?.id]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadDocumentsFromApi() {
+      try {
+        const documents = await getUploadedDocuments();
+
+        if (ignore) {
+          return;
+        }
+
+        setDocumentsData(documents);
+      } catch (error) {
+        if (!ignore) {
+          setDocumentsError(
+            error instanceof Error
+              ? error.message
+              : "Impossible de charger les documents."
+          );
+        }
+      } finally {
+        if (!ignore) {
+          setDocumentsLoading(false);
+        }
+      }
+    }
+
+    setDocumentsLoading(true);
+    setDocumentsError("");
+    loadDocumentsFromApi();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   const handleBackToMainWorkspace = () => {
     navigate(ROUTES.workspace);
@@ -44,37 +143,81 @@ export default function ProfessorAdminPage({ user, onLogout }) {
     navigate(ROUTES.login, { replace: true });
   };
 
-  const handleUpload = async (e) => {
-    e.preventDefault();
-    if (!selectedFile || !selectedModuleId) return;
+  const handleUploadDocument = async (event) => {
+    event.preventDefault();
 
-    setUploading(true);
+    if (!selectedModule || !selectedFile) {
+      setUploadMessage("Choisissez un cours et un fichier.");
+      return;
+    }
 
     try {
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-      formData.append("module_id", selectedModuleId);
-      formData.append("enseignant_id", user.id);
-
-      const response = await fetch(buildApiUrl("/ingestion/documents/upload"), {
-        method: "POST",
-        body: formData,
+      setUploading(true);
+      setUploadMessage("Import du document en cours...");
+      await uploadDocument({
+        moduleId: selectedModule.id,
+        enseignantId: user.id,
+        title: documentTitle,
+        file: selectedFile,
       });
-
-      if (!response.ok) {
-        throw new Error("Erreur lors de l'envoi du document");
-      }
-
-      // Gérer la réponse (succès)
-      alert("Document importé et indexé avec succès !");
-      setSelectedFile(null); // Réinitialiser le fichier
-      
-      // Ici on pourrait plus tard rafraîchir la liste des documents
+      setSelectedFile(null);
+      setCustomCourse("");
+      setUploadMessage("Document importé et indexé.");
+      await loadDocuments();
     } catch (error) {
-      console.error(error);
-      alert("Une erreur est survenue lors de l'importation.");
+      setUploadMessage(
+        error instanceof Error
+          ? error.message
+          : "Impossible d'importer le document."
+      );
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleDeleteDocument = async (documentId) => {
+    try {
+      setDocumentsError("");
+      await deleteDocument(documentId);
+      setDocumentsData((documents) =>
+        documents.filter((document) => document.id !== documentId)
+      );
+    } catch (error) {
+      setDocumentsError(
+        error instanceof Error
+          ? error.message
+          : "Impossible de supprimer le document."
+      );
+    }
+  };
+
+  const handleSaveSystemPrompt = async () => {
+    if (!selectedModule) {
+      setPromptMessage("Choisissez un cours avant d'enregistrer.");
+      return;
+    }
+
+    try {
+      setPromptSaving(true);
+      setPromptMessage("Enregistrement du prompt...");
+      const updatedModule = await updateModulePrompt(selectedModule.id, systemPrompt);
+
+      setModulesData((modules) =>
+        modules.map((module) =>
+          module.id === updatedModule.id
+            ? { ...module, system_prompt: updatedModule.system_prompt }
+            : module
+        )
+      );
+      setPromptMessage("Prompt enregistré.");
+    } catch (error) {
+      setPromptMessage(
+        error instanceof Error
+          ? error.message
+          : "Impossible d'enregistrer le prompt."
+      );
+    } finally {
+      setPromptSaving(false);
     }
   };
 
@@ -92,10 +235,10 @@ export default function ProfessorAdminPage({ user, onLogout }) {
 
         <div className="prof-topbar-actions">
           <div className="prof-user-badge">
-            <div className="prof-user-avatar">{user?.name?.charAt(0) || "P"}</div>
+            <div className="prof-user-avatar">{initial}</div>
             <div>
-              <p className="prof-user-name">{user?.name}</p>
-              <p className="prof-user-role">{user?.role}</p>
+              <p className="prof-user-name">{user.prenom}</p>
+              <p className="prof-user-role">{user.role}</p>
             </div>
           </div>
 
@@ -149,49 +292,65 @@ export default function ProfessorAdminPage({ user, onLogout }) {
                 </div>
               </div>
 
-              {/* Formulaire lié à handleUpload */}
-              <form className="prof-upload-grid" onSubmit={handleUpload}>
+              <form
+                className="prof-upload-grid"
+                onSubmit={handleUploadDocument}
+              >
                 <label className="prof-field">
-                  <span>Cours (Module)</span>
+                  <span>Cours</span>
                   <select
-                    value={selectedModuleId}
-                    onChange={(event) => setSelectedModuleId(event.target.value)}
-                    disabled={uploading}
+                    value={selectedCourse}
+                    onChange={(event) => setSelectedCourse(event.target.value)}
                   >
-                    {modulesData.map((module) => (
-                      <option key={module.id} value={module.id}>
-                        {module.nom || module.name}
+                    {courses.length === 0 ? (
+                      <option value="">Aucun cours disponible</option>
+                    ) : null}
+                    {courses.map((course) => (
+                      <option key={course} value={course}>
+                        {course}
                       </option>
                     ))}
                   </select>
                 </label>
 
                 <label className="prof-field">
+                  <span>Nom du document</span>
+                  <input
+                    type="text"
+                    placeholder="ex. TP réseaux"
+                    value={customCourse}
+                    onChange={(event) => setCustomCourse(event.target.value)}
+                  />
+                </label>
+
+                <label className="prof-field">
                   <span>Document du cours</span>
                   <input
+                    key={selectedFile?.name || "empty-file"}
                     type="file"
-                    accept=".pdf,.doc,.docx,.ppt,.pptx"
-                    disabled={uploading}
-                    onChange={(event) => {
-                      setSelectedFile(event.target.files?.[0] || null);
-                      // Reset l'input value si on annule
-                      if (!event.target.files?.[0]) event.target.value = "";
-                    }}
+                    accept=".pdf,.doc,.docx,.ppt,.pptx,.mp3,.mp4"
+                    onChange={(event) =>
+                      setSelectedFile(event.target.files?.[0] || null)
+                    }
                   />
                 </label>
 
                 <div className="prof-upload-actions">
-                  <button 
-                    type="submit" 
-                    className="prof-primary-button" 
-                    disabled={!selectedFile || !selectedModuleId || uploading}
+                  <button
+                    type="submit"
+                    className="prof-primary-button"
+                    disabled={!canUpload}
                   >
-                    {uploading ? "Importation en cours..." : "Importer et indexer le document"}
+                    {uploading
+                      ? "Import en cours..."
+                      : "Importer et indexer le document"}
                   </button>
                   <p className="prof-upload-hint">
-                    {selectedFile
-                      ? `${selectedFile.name} sélectionné.`
-                      : "Choisissez un cours et un fichier."}
+                    {uploadMessage ||
+                    modulesError ||
+                    (selectedFile
+                      ? `${documentTitle} sélectionné pour ${selectedCourse}.`
+                      : "Choisissez un cours et un fichier.")}
                   </p>
                 </div>
               </form>
@@ -206,22 +365,38 @@ export default function ProfessorAdminPage({ user, onLogout }) {
                 </span>
               </div>
 
-              {uploadedDocuments.length > 0 ? (
+              {documentsLoading ? (
+                <div className="prof-empty-state">
+                  <p className="prof-empty-title">Chargement des documents...</p>
+                </div>
+              ) : documentsError ? (
+                <div className="prof-empty-state">
+                  <p className="prof-empty-title">{documentsError}</p>
+                </div>
+              ) : uploadedDocuments.length > 0 ? (
                 <div className="prof-documents-list">
                   {uploadedDocuments.map((document) => (
                     <div key={document.id} className="prof-document-card">
-                      <p className="prof-empty-title">{document.name}</p>
-                      <p className="prof-empty-copy">{document.course}</p>
+                      <div>
+                        <p className="prof-empty-title">{document.title}</p>
+                        <p className="prof-empty-copy">{document.status}</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="prof-delete-document-button"
+                        onClick={() => handleDeleteDocument(document.id)}
+                        aria-label={`Supprimer ${document.title}`}
+                      >
+                        <img src="/delete.png" alt="" className="prof-delete-document-icon" />
+                      </button>
                     </div>
                   ))}
                 </div>
               ) : (
                 <div className="prof-empty-state">
-                  <p className="prof-empty-title">
-                    {professorDashboardData.emptyDocumentsMessage.title}
-                  </p>
+                  <p className="prof-empty-title">Aucun document importé</p>
                   <p className="prof-empty-copy">
-                    {professorDashboardData.emptyDocumentsMessage.description}
+                    Aucun document n'est associé au cours {selectedCourse}.
                   </p>
                 </div>
               )}
@@ -236,8 +411,27 @@ export default function ProfessorAdminPage({ user, onLogout }) {
                 <p className="prof-section-kicker">Configuration</p>
                 <h2>Prompt système de l'assistant</h2>
               </div>
-              <span className="prof-save-indicator">Non enregistré</span>
+              <span className="prof-save-indicator">
+                {promptMessage || "Module actuel"}
+              </span>
             </div>
+
+            <label className="prof-field">
+              <span>Cours</span>
+              <select
+                value={selectedCourse}
+                onChange={(event) => setSelectedCourse(event.target.value)}
+              >
+                {courses.length === 0 ? (
+                  <option value="">Aucun cours disponible</option>
+                ) : null}
+                {courses.map((course) => (
+                  <option key={course} value={course}>
+                    {course}
+                  </option>
+                ))}
+              </select>
+            </label>
 
             <label className="prof-field">
               <span>Instructions globales du prompt</span>
@@ -249,8 +443,13 @@ export default function ProfessorAdminPage({ user, onLogout }) {
             </label>
 
             <div className="prof-inline-actions">
-              <button type="button" className="prof-primary-button" disabled>
-                Enregistrer le prompt système
+              <button
+                type="button"
+                className="prof-primary-button"
+                disabled={!selectedModule || promptSaving}
+                onClick={handleSaveSystemPrompt}
+              >
+                {promptSaving ? "Enregistrement..." : "Enregistrer le prompt système"}
               </button>
             </div>
           </section>

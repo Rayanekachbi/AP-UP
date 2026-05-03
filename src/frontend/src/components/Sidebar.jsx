@@ -5,6 +5,7 @@ export default function Sidebar({
   selectedModule,
   expandedModuleId,
   modules,
+  documents = [],
   onToggleSidebar,
   onSelectModule,
   onToggleModule,
@@ -34,6 +35,9 @@ export default function Sidebar({
             {modules.map((module) => {
               const isExpanded = expandedModuleId === module.id;
               const isSelected = selectedModule.id === module.id;
+              const moduleDocuments = documents.filter(
+                (document) => document.course === module.nom
+              );
 
               return (
                 <div
@@ -45,7 +49,7 @@ export default function Sidebar({
                       className="course-name-button"
                       onClick={() => onSelectModule(module)}
                     >
-                      {module.name}
+                      {module.nom}
                     </button>
 
                     <button
@@ -58,8 +62,10 @@ export default function Sidebar({
 
                   {isExpanded && (
                     <div className="course-files">
-                      {module.files.length > 0 ? (
-                        module.files.map((file, index) => <p key={index}>{file}</p>)
+                      {moduleDocuments.length > 0 ? (
+                        moduleDocuments.map((document) => (
+                          <p key={document.id}>{document.title}</p>
+                        ))
                       ) : (
                         <p className="course-placeholder">Aucun document</p>
                       )}
